@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import json
-import os
 import mlflow
 import logging
 import gc
@@ -32,9 +31,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
 
-ROOT = Path(__file__).resolve().parents[2]
-mlflow.set_tracking_uri(f"sqlite:///{ROOT}/mlflow.db")
-mlflow.set_experiment(experiment_name="Home_Credit_Default_Risk")
+ROOT = Path.cwd()
 
 
 class FeatureEngineeringPipeline:
@@ -56,7 +53,7 @@ class FeatureEngineeringPipeline:
     6. Saves train/test splits to parquet files
     """
     
-    def __init__(self, use_cache: bool = True, output_dir: str = 'data/processed'):
+    def __init__(self, use_cache: bool = True):
         """
         Initialize the feature engineering pipeline.
         
@@ -64,9 +61,10 @@ class FeatureEngineeringPipeline:
             use_cache (bool): Whether to use cached parquet files for faster loading.
                             If False, will reload from CSV. Default: True.
         """
-        self.loader = DataLoader()
+        self.loader = DataLoader(raw_dir=str(ROOT / 'data' / 'raw'), cache_dir=str(ROOT / 'data' / 'cache'))
         self.use_cache = use_cache
-        self.output_dir = output_dir
+        self.output_dir = ROOT / "data" / "processed"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         
         self.app_preprocessor = ApplicationPreprocessor()
         self.prev_preprocessor = PreviousPreprocessor()
@@ -116,7 +114,6 @@ class FeatureEngineeringPipeline:
             mlflow.log_params({
                 "top_n_selection": 300,
                 "cache_enabled": self.use_cache,
-                "output_dir": self.output_dir
             })
             
             data = self.loader.load_all(use_cache=self.use_cache)
@@ -216,12 +213,10 @@ class FeatureEngineeringPipeline:
             mlflow.log_metric("df_columns", df.shape[1])
             mlflow.log_metric("df_rows", df.shape[0])
             
-            # Load files to MLflow UI
-            mlflow.log_artifact(os.path.join(self.output_dir, 'selected_features.json'))
             # Save data head
-            sample_path = os.path.join(self.output_dir, "sample_features.csv")
+            sample_path = self.output_dir / "sample_features.csv"
             df.head(100).to_csv(sample_path, index=False)
-            mlflow.log_artifact(sample_path)
+            mlflow.log_artifact(str(sample_path))
             
             return df
         
@@ -261,31 +256,27 @@ class FeatureEngineeringPipeline:
         selector = SelectFromModel(Ridge(alpha=1.0), max_features=top_n, threshold=-np.inf)
         selector.fit(X_prepared, y)
         
-        # Извлечение важности коэффициентов
-        ridge_model = selector.estimator_ # Достаем сам обученный Ridge из селектора
+        ridge_model = selector.estimator_
         importance = np.abs(ridge_model.coef_)
         
         feature_importance = pd.DataFrame({'feature': X.columns, 'importance': importance}).sort_values(by='importance', ascending=False)
     
-        # Сохранение и логирование важности признаков
-        importance_path = os.path.join(self.output_dir, 'feature_importance.csv')
+        # Save and log feature importance
+        importance_path = self.output_dir / "feature_importance.csv"
         feature_importance.to_csv(importance_path, index=False)
-        mlflow.log_artifact(importance_path)
-        
-        # Логируем ТОП-10 признаков
-        top_10 = feature_importance.head(10).to_string()
-        mlflow.log_text(top_10, "top_10_features.txt")
-        
+        mlflow.log_artifact(str(importance_path))
+
         selected_cols = X.columns[selector.get_support()].tolist()
-        final_cols =['SK_ID_CURR', 'TARGET'] + selected_cols
-        
-        logger.info(f"Selected {len(selected_cols)} features out of {X.shape[1]}")
-        
-        os.makedirs(self.output_dir, exist_ok=True)
-        with open(os.path.join(self.output_dir, 'selected_features.json'), 'w') as f:
+
+        json_path = self.output_dir / "selected_features.json"
+        with open(json_path, "w") as f:
             json.dump(selected_cols, f, indent=2)
-        mlflow.log_artifact(os.path.join(self.output_dir, 'selected_features.json'))
-        
+
+        mlflow.log_artifact(str(json_path))
+
+        final_cols = ['SK_ID_CURR', 'TARGET'] + selected_cols
+
+        logger.info(f"Selected {len(selected_cols)} features out of {X.shape[1]}")
         return df[final_cols]
 
 
@@ -302,16 +293,21 @@ class FeatureEngineeringPipeline:
         Returns:
             None
         """
-        os.makedirs('data/processed', exist_ok=True)
-        
-        train = df[df['TARGET'].notnull()]
-        test = df[df['TARGET'].isnull()].drop(columns=['TARGET'])
-        
-        train.to_parquet('data/processed/train_features.parquet', index=False)
-        test.to_parquet('data/processed/test_features.parquet', index=False)
-        
-        logger.info(f"Saved train features: {train.shape} to data/processed/train_features.parquet")
-        logger.info(f"Saved test features: {test.shape} to data/processed/test_features.parquet")
+        train = df[df["TARGET"].notnull()]
+        test = df[df["TARGET"].isnull()].drop(columns=["TARGET"])
+
+        train_path = self.output_dir / "train_features.parquet"
+        test_path = self.output_dir / "test_features.parquet"
+
+        train.to_parquet(train_path, index=False)
+        test.to_parquet(test_path, index=False)
+
+        mlflow.log_artifact(str(train_path))
+        mlflow.log_artifact(str(test_path))
+
+        logger.info(f"Saved train to {train_path}")
+        logger.info(f"Saved test to {test_path}")
+
 
 
 if __name__ == "__main__":
