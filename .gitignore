@@ -231,3 +231,4 @@ data/**/*
 # MLflow
 mlruns.db
 mlruns/
+*.db
