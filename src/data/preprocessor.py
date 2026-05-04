@@ -4,7 +4,6 @@ from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from sklearn.model_selection import KFold
 import logging
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -134,6 +133,58 @@ def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: 
     test_encoded = test[col].map(final_means).fillna(global_mean)
     
     return train_encoded, test_encoded
+
+
+def process_side_table(df, train_ids, preprocessor, table_name):
+    """
+    Cleans and encodes child tables while strictly preventing data leakage.
+
+    This utility manages the end-to-end preprocessing flow for auxiliary tables 
+    (e.g., Bureau, Previous Applications). It ensures that statistical 
+    transformations�such as cardinality reduction and One-Hot Encoding�are 
+    informed solely by the training distribution.
+
+    The process follows these steps:
+    1. Fixes domain-specific anomalies using the provided stateless preprocessor.
+    2. Splits the table into training and testing segments based on the 
+        'SK_ID_CURR' identifiers present in the main application training set.
+    3. Reduces categorical cardinality by grouping rare categories into 
+        an 'Other' label, fitting only on the training segment.
+    4. Applies One-Hot Encoding, ensuring the encoder is fitted strictly on 
+        training data to prevent the model from learning test-only categories.
+
+    Args:
+        df (pd.DataFrame): The raw child table to process.
+        train_ids (np.array or list): List of 'SK_ID_CURR' identifiers belonging 
+            to the training set.
+        preprocessor (object): A preprocessor instance (e.g., PreviousPreprocessor) 
+            containing a `fix_anomalies` method.
+        table_name (str): Name of the table for logging purposes.
+
+    Returns:
+        tuple: A tuple containing:
+            - pd.DataFrame: The processed and recombined (train + test) DataFrame.
+            - list: Names of the newly generated categorical columns.
+    """
+    logger.info(f"Preprocessing {table_name}...")
+        
+    # Anomalies fix
+    df = preprocessor.fix_anomalies(df)
+
+    # If not SK_ID_CURR
+    if 'SK_ID_CURR' not in df.columns:
+        raise KeyError(f"'SK_ID_CURR' missing in {table_name}")
+
+    # Split into train and test sets for training encoders
+    train_part = df[df['SK_ID_CURR'].isin(train_ids)]
+    test_part = df[~df['SK_ID_CURR'].isin(train_ids)]
+
+    # Reduce cardinality
+    train_part, test_part, _ = reduce_cardinality(train_part, test_part)
+    # One-Hot Encoding
+    train_part, test_part, cat_cols = one_hot_encoder(train_part, test_part)
+
+    return (pd.concat([train_part, test_part], ignore_index=True), cat_cols)
 
 
 class ApplicationPreprocessor:
@@ -271,5 +322,11 @@ class InstallmentsPreprocessor:
         """Stateless anomaly fixing for Installments"""
         df = df.copy()
         return df
+    
+    
+class PassThroughPreprocessor:
+    """Fallback preprocessor for tables without specific anomaly handling"""
+    def fix_anomalies(self, df: pd.DataFrame) -> pd.DataFrame:
+        return df.copy()
     
     
