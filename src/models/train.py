@@ -1,9 +1,9 @@
 import argparse
 import pandas as pd
 import json
-import joblib
 import mlflow
 import logging
+import joblib
 from pathlib import Path
 import numpy as np
 
@@ -18,6 +18,7 @@ from src.evaluation.metrics import compute_all_metrics
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
+logging.getLogger("mlflow").setLevel(logging.ERROR)
 
 MODEL_REGISTRY = {
     "logreg": LogRegModel,
@@ -34,6 +35,8 @@ def parse_args():
                         help="Number of the Optuna HPO iterations")
     parser.add_argument("--folds", type=int, default=5,
                         help="Folds number for the final CV")
+    parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "gpu"],
+                        help="Device to use for training (cpu or gpu)")
     return parser.parse_args()
 
 def main():
@@ -65,19 +68,22 @@ def main():
     # MLflow setup
     mlflow.set_experiment("Home_Credit_Default_Risk")
     
+    base_params = {"device": args.device}
+    
     # HPO
     with mlflow.start_run(run_name=f"{model_name}_hpo"):
 
         tuner = OptunaHPOTuner(
             model_class=ModelClass,
             db_path="sqlite:///optuna.db",
-            study_name=f"{model_name}_hyperopt"
+            study_name=f"{model_name}_hyperopt",
         )
         
         logger.info(f"Starting {args.trials} HPO trials for {model_name}...")
         tuner.optimize(X, y, n_trials=args.trials)
         
         best_params = tuner.study.best_params
+        best_params.update(base_params) 
         logger.info(f"Best params found: {best_params}")
 
     # Final eval and training
@@ -103,22 +109,28 @@ def main():
         logger.info("Train final model on the full dataset...")
         final_model.fit(X, y)
 
-        # Save artifacts
+        # Save the model
+        mlflow.sklearn.log_model(
+            sk_model=final_model,
+            artifact_path="model", 
+            input_example=X.head(5),
+            pyfunc_predict_fn="predict_proba"
+        )
+        # For backup
         model_path = ARTIFACT_DIR / "model.joblib"
         joblib.dump(final_model, model_path)
-        mlflow.log_artifact(str(model_path), "models")
 
         # Feature importance
         fi_df = final_model.get_feature_importance()
         fi_path = ARTIFACT_DIR / "feature_importance.csv"
         fi_df.to_csv(fi_path, index=False)
-        mlflow.log_artifact(str(fi_path), "insights")
 
         # Thresholds
         thresh_path = ARTIFACT_DIR / "thresholds.json"
         with open(thresh_path, "w") as f:
             json.dump(thresholds, f, indent=4)
-        mlflow.log_artifact(str(thresh_path), "config")
+            
+        mlflow.log_artifacts(str(ARTIFACT_DIR), artifact_path="metadata")
 
         logger.info(f"The pipeline for {model_name} is successfully completed! The model is ready for usage!")
 
