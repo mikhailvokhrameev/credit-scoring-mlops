@@ -92,7 +92,7 @@ def compute_all_metrics(y_true: np.ndarray, y_prob: np.ndarray, prefix: str = ""
     else:
         logger.warning("No active MLflow run found")
 
-    return metrics
+    return metrics_with_prefix
 
 
 def compare_models(results_dict: Dict[str, list]) -> Tuple[str, float]:
