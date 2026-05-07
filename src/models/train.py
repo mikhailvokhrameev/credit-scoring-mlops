@@ -98,6 +98,7 @@ def main():
 
         # Compute metrics
         metrics = compute_all_metrics(y.values, oof_preds, prefix="final_oof_")
+        mlflow.log_metrics(metrics)
         logger.info(f"Final ROC AUC: {metrics['final_oof_roc_auc']:.4f}")
         logger.info(f"Final PR AUC: {metrics['final_oof_average_precision']:.4f}")
 
