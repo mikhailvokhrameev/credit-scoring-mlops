@@ -56,8 +56,8 @@ class XGBModel(BaseModel):
         device = self.params.get('device', 'cpu')
         
         if device == 'gpu':
-            self.params.setdefault('tree_method', 'gpu_hist')
-            self.params.setdefault('predictor', 'gpu_predictor')
+            self.params['tree_method'] = 'hist'
+            self.params['device'] = 'cuda'
         else:
             self.params['tree_method'] = 'hist'
             self.params['device'] = 'cpu'
