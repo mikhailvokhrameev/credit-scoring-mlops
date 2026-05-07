@@ -52,15 +52,6 @@ class LogRegModel(BaseModel):
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         return self.model.predict_proba(X)[:, 1]
 
-    def get_feature_importance(self) -> pd.DataFrame:
-        """Extracts coefficients from Logistic Regression"""
-        clf = self.model.named_steps['clf']
-        selected_features = self.model[:-1].get_feature_names_out(self.features_)
-
-        importance = np.abs(clf.coef_[0])
-
-        fi_df = pd.DataFrame({"feature": selected_features, "importance": importance})
-        return fi_df.sort_values("importance", ascending=False)
 
     def get_optuna_space(self, trial) -> Dict[str, Any]:
         return {

@@ -86,14 +86,6 @@ class CatBoostModel(BaseModel):
         return self.model.predict_proba(X)[:, 1]
 
 
-    def get_feature_importance(self) -> pd.DataFrame:
-        if getattr(self, "model", None) is None:
-            raise ValueError("Model is not trained yet")
-            
-        importance = self.model.get_feature_importance()
-        return pd.DataFrame({'feature': self.features_, 'importance': importance}).sort_values(by='importance', ascending=False)
-
-
     def get_optuna_space(self, trial) -> Dict[str, Any]:
         return {
             "iterations": trial.suggest_int("iterations", 200, 2000),

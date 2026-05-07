@@ -70,70 +70,67 @@ def main():
     
     base_params = {"device": args.device}
     
-    # HPO
-    with mlflow.start_run(run_name=f"{model_name}_hpo"):
-
-        tuner = OptunaHPOTuner(
-            model_class=ModelClass,
-            db_path="sqlite:///optuna.db",
-            study_name=f"{model_name}_hyperopt",
-        )
+    with mlflow.start_run(run_name=model_name):
         
-        logger.info(f"Starting {args.trials} HPO trials for {model_name}...")
-        tuner.optimize(X, y, n_trials=args.trials)
-        
-        best_params = tuner.study.best_params
-        best_params.update(base_params) 
-        logger.info(f"Best params found: {best_params}")
+        # HPO
+        with mlflow.start_run(run_name="HPO", nested=True):
 
-    # Final eval and training
-    with mlflow.start_run(run_name=f"{model_name}_Final_Production"):
-        mlflow.log_params(best_params)
-
-        # Chosen model with the best params
-        final_model = ModelClass(params=best_params)
-
-        logger.info(f"Run final {args.folds}-fold CV...")
-        oof_preds, cv_models = final_model.cross_validate(X, y, n_splits=args.folds)
-
-        # Compute metrics
-        metrics = compute_all_metrics(y.values, oof_preds, prefix="final_oof_")
-        mlflow.log_metrics(metrics)
-        logger.info(f"Final ROC AUC: {metrics['final_oof_roc_auc']:.4f}")
-        logger.info(f"Final PR AUC: {metrics['final_oof_average_precision']:.4f}")
-
-        # Find optimal threshold
-        thresholds = final_model.optimize_threshold(y.values, oof_preds, fn_cost=10.0, fp_cost=1.0)
-        logger.info(f"Optimal thresholds: {thresholds}")
-
-        # Train on the all data
-        logger.info("Train final model on the full dataset...")
-        final_model.fit(X, y)
-
-        # Save the model
-        mlflow.sklearn.log_model(
-            sk_model=final_model,
-            artifact_path="model", 
-            input_example=X.head(5),
-            pyfunc_predict_fn="predict_proba"
-        )
-        # For backup
-        model_path = ARTIFACT_DIR / "model.joblib"
-        joblib.dump(final_model, model_path)
-
-        # Feature importance
-        fi_df = final_model.get_feature_importance()
-        fi_path = ARTIFACT_DIR / "feature_importance.csv"
-        fi_df.to_csv(fi_path, index=False)
-
-        # Thresholds
-        thresh_path = ARTIFACT_DIR / "thresholds.json"
-        with open(thresh_path, "w") as f:
-            json.dump(thresholds, f, indent=4)
+            tuner = OptunaHPOTuner(
+                model_class=ModelClass,
+                db_path="sqlite:///optuna.db",
+                study_name=f"{model_name}_hyperopt",
+            )
             
-        mlflow.log_artifacts(str(ARTIFACT_DIR), artifact_path="metadata")
+            logger.info(f"Starting {args.trials} HPO trials for {model_name}...")
+            tuner.optimize(X, y, n_trials=args.trials)
+            
+            best_params = tuner.study.best_params
+            best_params.update(base_params) 
+            logger.info(f"Best params found: {best_params}")
 
-        logger.info(f"The pipeline for {model_name} is successfully completed! The model is ready for usage!")
+        # Final eval and training
+        with mlflow.start_run(run_name="Final_Production", nested=True):
+            mlflow.log_params(best_params)
+
+            # Chosen model with the best params
+            final_model = ModelClass(params=best_params)
+
+            logger.info(f"Run final {args.folds}-fold CV...")
+            oof_preds, cv_models = final_model.cross_validate(X, y, n_splits=args.folds)
+
+            # Compute metrics
+            metrics = compute_all_metrics(y.values, oof_preds, prefix="final_oof_")
+            mlflow.log_metrics(metrics)
+            logger.info(f"Final ROC AUC: {metrics['final_oof_roc_auc']:.4f}")
+            logger.info(f"Final PR AUC: {metrics['final_oof_average_precision']:.4f}")
+
+            # Find optimal threshold
+            thresholds = final_model.optimize_threshold(y.values, oof_preds, fn_cost=10.0, fp_cost=1.0)
+            logger.info(f"Optimal thresholds: {thresholds}")
+
+            # Train on the all data
+            logger.info("Train final model on the full dataset...")
+            final_model.fit(X, y)
+
+            # Save the model
+            mlflow.sklearn.log_model(
+                sk_model=final_model,
+                artifact_path="model", 
+                input_example=X.head(5),
+                pyfunc_predict_fn="predict_proba"
+            )
+            # For backup
+            model_path = ARTIFACT_DIR / "model.joblib"
+            joblib.dump(final_model, model_path)
+
+            # Thresholds
+            thresh_path = ARTIFACT_DIR / "thresholds.json"
+            with open(thresh_path, "w") as f:
+                json.dump(thresholds, f, indent=4)
+                
+            mlflow.log_artifacts(str(ARTIFACT_DIR), artifact_path="metadata")
+
+            logger.info(f"The pipeline for {model_name} is successfully completed! The model is ready for usage!")
 
 if __name__ == "__main__":
     main()

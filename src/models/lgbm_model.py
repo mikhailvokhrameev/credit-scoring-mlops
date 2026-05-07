@@ -72,15 +72,6 @@ class LGBMModel(BaseModel):
         return self.model.predict_proba(X)[:, 1]
 
 
-    def get_feature_importance(self) -> pd.DataFrame:
-        if self.model is None:
-            raise ValueError("Model is not trained yet")
-        
-        importance = self.model.booster_.feature_importance(importance_type="gain")
-
-        return pd.DataFrame({"feature": self.features_, "importance": importance}).sort_values(by="importance", ascending=False)
-
-
     def get_optuna_space(self, trial) -> Dict[str, Any]:
         
         device = self.params.get('device', 'cpu')
