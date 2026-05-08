@@ -1,6 +1,5 @@
 import logging
 import warnings
-import json
 
 import shap
 
@@ -13,7 +12,6 @@ from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
 from sklearn.linear_model import LogisticRegression
-
 from sklearn.pipeline import Pipeline 
 from pathlib import Path
 
@@ -23,16 +21,6 @@ warnings.filterwarnings("ignore")
 
 
 class ModelExplainer:
-    """
-    Universal SHAP explainer.
-
-    Supports:
-    - XGBoost
-    - CatBoost
-    - LightGBM
-    - LogisticRegression (Fast LinearExplainer)
-    - Any sklearn-compatible model
-    """
     def __init__(self, model, X_train: pd.DataFrame, feature_names: list = None, max_background_samples: int = 1000, output_dir: Path = None):
         self.model = model
         self.output_dir = output_dir
@@ -74,7 +62,10 @@ class ModelExplainer:
             X_sample_transformed = X_sample
 
         if getattr(self, "is_linear_pipeline", False):
-            X_for_shap = self.preprocessor.transform(X_sample_transformed)
+            X_for_shap = pd.DataFrame(
+                self.preprocessor.transform(X_sample_transformed), 
+                columns=X_sample_transformed.columns
+            )
         else:
             X_for_shap = X_sample_transformed
 
@@ -93,31 +84,19 @@ class ModelExplainer:
             except Exception:
                 vals = self.explainer(X_for_shap)
 
-        logger.info(f"Raw SHAP values type: {type(vals)}")
-
         if isinstance(vals, shap.Explanation):
-            logger.info(f"Raw SHAP values shape: {vals.shape}")
             if len(vals.shape) == 3:
-                if vals.shape[2] == 2:
-                    logger.info("Selecting class 1 from SHAP values.")
-                    self.shap_values = vals[:, :, 1]
-                else:
-                    self.shap_values = vals[:, :, 0]
+                self.shap_values = vals[:, :, 1] if vals.shape[2] == 2 else vals[:, :, 0]
             else:
                 self.shap_values = vals
         else:
-            logger.info("SHAP returned raw arrays instead of Explanation object.")
-            if isinstance(vals, list):
-                sv = vals[1] if len(vals) > 1 else vals[0]
-            else:
-                if len(vals.shape) == 3:
-                    sv = vals[:, :, 1] if vals.shape[2] == 2 else vals[:, :, 0]
-                else:
-                    sv = vals
+            sv = vals[1] if isinstance(vals, list) and len(vals) > 1 else (vals[0] if isinstance(vals, list) else vals)
+            if len(sv.shape) == 3:
+                sv = sv[:, :, 1] if sv.shape[2] == 2 else sv[:, :, 0]
             
             self.shap_values = shap.Explanation(
                 values=sv,
-                data=X_sample_transformed.values,
+                data=X_for_shap.values,
                 feature_names=self.feature_names
             )
 
@@ -126,8 +105,6 @@ class ModelExplainer:
             
         if hasattr(self.shap_values, "feature_names"):
              self.shap_values.feature_names = self.feature_names
-
-        logger.info(f"Final SHAP values shape for plotting: {self.shap_values.shape}")
         
         try:
             shap_beeswarm_path = self.output_dir / "shap_summary_beeswarm.png"
@@ -152,59 +129,46 @@ class ModelExplainer:
     def _create_explainer(self):
         model = self.model
 
-        logger.info(f"Raw model type: {type(model)}")
-
         while hasattr(model, "model"):
             model = model.model
             logger.info(f"Unwrapped wrapper -> {type(model).__name__}")
 
-        if isinstance(model, Pipeline):
-            logger.info("Detected Pipeline")
+        if isinstance(model, Pipeline) or type(model).__name__ == "Pipeline":
             clf = model.steps[-1][1]
-            if isinstance(clf, LogisticRegression):
-                logger.info("Pipeline ends with LogisticRegression. Using ultra-fast LinearExplainer.")
+            clf_name = type(clf).__name__
+            
+            if "LogisticRegression" in clf_name or "Linear" in clf_name:
+                logger.info("Pipeline ends with LogisticRegression. Extracting LinearExplainer for ultra-fast processing.")
                 self.is_linear_pipeline = True
                 self.preprocessor = Pipeline(model.steps[:-1])
                 
-                X_train_preprocessed = self.preprocessor.transform(self.X_train)
+                X_train_preprocessed = pd.DataFrame(
+                    self.preprocessor.transform(self.X_train), 
+                    columns=self.X_train.columns
+                )
                 masker = shap.maskers.Independent(X_train_preprocessed)
                 return shap.LinearExplainer(clf, masker)
             else:
-                logger.info("Using default Explainer for Pipeline (PermutationExplainer)")
+                logger.info("Using default PermutationExplainer for Pipeline")
                 masker = shap.maskers.Independent(self.X_train)
                 return shap.Explainer(model.predict_proba, masker)
 
         if isinstance(model, XGBClassifier):
             logger.info(f"Using TreeExplainer for {type(model).__name__}")
-            booster = model.get_booster()
-            
-            old_save_config = booster.save_config
-            def custom_save_config(*args, **kwargs):
-                conf = json.loads(old_save_config(*args, **kwargs))
-                if "learner" in conf and "learner_model_param" in conf["learner"]:
-                    bs = conf["learner"]["learner_model_param"].get("base_score", "")
-                    if isinstance(bs, str) and bs.startswith("["):
-                        conf["learner"]["learner_model_param"]["base_score"] = bs.strip("[]")
-                return json.dumps(conf)
-                
-            booster.save_config = custom_save_config
-            return shap.TreeExplainer(booster)
+            return shap.TreeExplainer(model)
 
         if isinstance(model, (LGBMClassifier, CatBoostClassifier)):
             logger.info(f"Using TreeExplainer for {type(model).__name__}")
             return shap.TreeExplainer(model)
 
         if isinstance(model, LogisticRegression):
-            logger.info("Using LinearExplainer for LogisticRegression")
             masker = shap.maskers.Independent(self.X_train)
             return shap.LinearExplainer(model, masker)
 
-        raise ValueError(f"Unsupported model type: {type(model)}")
+        return shap.TreeExplainer(model)
             
 
     def explain_local_shap(self, instance: pd.Series, save_path: str = None, max_display: int = 15) -> str:
-        logger.info("Generating local SHAP explanation...")
-        
         if save_path is None:
             save_path = self.output_dir / "local_shap_waterfall.png"
     
@@ -216,7 +180,10 @@ class ModelExplainer:
             instance_df_transformed = instance_df
 
         if getattr(self, "is_linear_pipeline", False):
-            X_for_shap = self.preprocessor.transform(instance_df_transformed)
+            X_for_shap = pd.DataFrame(
+                self.preprocessor.transform(instance_df_transformed), 
+                columns=instance_df_transformed.columns
+            )
         else:
             X_for_shap = instance_df_transformed
 
@@ -236,22 +203,16 @@ class ModelExplainer:
                 local_shap = self.explainer(X_for_shap)
 
         if isinstance(local_shap, shap.Explanation):
-            if len(local_shap.shape) == 3 and local_shap.shape[2] == 2:
-                local_shap = local_shap[:, :, 1]
-            elif len(local_shap.shape) == 3:
-                local_shap = local_shap[:, :, 0]
+            if len(local_shap.shape) == 3:
+                local_shap = local_shap[:, :, 1] if local_shap.shape[2] == 2 else local_shap[:, :, 0]
         else:
-            if isinstance(local_shap, list):
-                ls = local_shap[1] if len(local_shap) > 1 else local_shap[0]
-            else:
-                if len(local_shap.shape) == 3:
-                    ls = local_shap[:, :, 1] if local_shap.shape[2] == 2 else local_shap[:, :, 0]
-                else:
-                    ls = local_shap
+            ls = local_shap[1] if isinstance(local_shap, list) and len(local_shap) > 1 else (local_shap[0] if isinstance(local_shap, list) else local_shap)
+            if len(ls.shape) == 3:
+                ls = ls[:, :, 1] if ls.shape[2] == 2 else ls[:, :, 0]
             
             local_shap = shap.Explanation(
                 values=ls,
-                data=instance_df_transformed.values,
+                data=X_for_shap.values,
                 feature_names=self.feature_names
             )
 
@@ -263,7 +224,6 @@ class ModelExplainer:
 
         plt.figure(figsize=(12, 6))
         shap.plots.waterfall(local_shap[0], max_display=max_display, show=False)
-        
         plt.title("Local SHAP Explanation")
         plt.tight_layout()
         plt.savefig(save_path, dpi=200, bbox_inches="tight")
