@@ -32,6 +32,12 @@ class LGBMModel(BaseModel):
             X[col] = 0
 
         return X[self.features_]
+
+
+    def transform(self, X):
+        X = self._sanitize_columns(X)
+        X = self._align_features(X)
+        return X
     
     
     def fit(self, X: pd.DataFrame, y: pd.Series, eval_set=None) -> 'LGBMModel':
@@ -51,13 +57,7 @@ class LGBMModel(BaseModel):
         callbacks = []
 
         if eval_data is not None:
-            callbacks.append(
-                lgb.early_stopping(
-                    stopping_rounds=100,
-                    verbose=False
-                )
-            )
-
+            callbacks.append(lgb.early_stopping(stopping_rounds=100, verbose=False))
             callbacks.append(lgb.log_evaluation(period=50))
 
         self.model.fit(X, y, eval_set=eval_data, eval_metric="auc", callbacks=callbacks)
@@ -66,19 +66,9 @@ class LGBMModel(BaseModel):
     
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        # Sanitize and align internally before predicting
         X = self._sanitize_columns(X)
         X = self._align_features(X)
         return self.model.predict_proba(X)[:, 1]
-
-
-    def get_feature_importance(self) -> pd.DataFrame:
-        if self.model is None:
-            raise ValueError("Model is not trained yet")
-        
-        importance = self.model.booster_.feature_importance(importance_type="gain")
-
-        return pd.DataFrame({"feature": self.features_, "importance": importance}).sort_values(by="importance", ascending=False)
 
 
     def get_optuna_space(self, trial) -> Dict[str, Any]:

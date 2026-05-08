@@ -38,10 +38,6 @@ class BaseModel(abc.ABC):
         """Returns the probability of the positive class (default)"""
         pass
 
-    @abc.abstractmethod
-    def get_feature_importance(self) -> pd.DataFrame:
-        """Returns a DataFrame containing feature importances"""
-        pass
 
     @abc.abstractmethod
     def get_optuna_space(self, trial) -> Dict[str, Any]:
@@ -141,3 +137,7 @@ class BaseModel(abc.ABC):
         }
         mlflow.log_metrics(metrics)
         return metrics
+    
+    
+    def transform(self, X):
+        raise NotImplementedError

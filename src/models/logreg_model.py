@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 import mlflow.sklearn
 from typing import Dict, Any
 from sklearn.pipeline import Pipeline
@@ -8,6 +7,7 @@ from sklearn.linear_model import LogisticRegression
 from src.models.base import BaseModel
 from sklearn.impute import SimpleImputer
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,32 @@ class LogRegModel(BaseModel):
     """
     Fast Baseline Logistic Regression.
     Pipeline: Imputer -> Scaler -> LogReg.
-    """     
+    """
+    def _sanitize_columns(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Removes special characters from column names"""
+        X = X.copy()
+        X.columns = [
+            re.sub(r"[^0-9a-zA-Z_]+", "_", str(c))
+            for c in X.columns
+        ]
+        return X
+
+
+    def _align_features(self, X: pd.DataFrame) -> pd.DataFrame:
+        X = X.copy()
+
+        missing = set(self.features_) - set(X.columns)
+        for col in missing:
+            X[col] = 0
+
+        return X.reindex(columns=self.features_)
+    
+    def transform(self, X):
+        X = self._sanitize_columns(X)
+        X = self._align_features(X)
+        return X
+    
+    
     def fit(self, X: pd.DataFrame, y: pd.Series, eval_set=None) -> 'LogRegModel':
         X = X.copy()
         numeric_cols = X.select_dtypes(include=['int64', 'int32', 'integer']).columns
@@ -49,18 +74,11 @@ class LogRegModel(BaseModel):
         
         return self
     
-    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+    
+    def predict_proba(self, X):
+        X = self._align_features(X)
         return self.model.predict_proba(X)[:, 1]
 
-    def get_feature_importance(self) -> pd.DataFrame:
-        """Extracts coefficients from Logistic Regression"""
-        clf = self.model.named_steps['clf']
-        selected_features = self.model[:-1].get_feature_names_out(self.features_)
-
-        importance = np.abs(clf.coef_[0])
-
-        fi_df = pd.DataFrame({"feature": selected_features, "importance": importance})
-        return fi_df.sort_values("importance", ascending=False)
 
     def get_optuna_space(self, trial) -> Dict[str, Any]:
         return {
