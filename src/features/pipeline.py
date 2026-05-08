@@ -109,6 +109,9 @@ class FeatureEngineeringPipeline:
             This function starts and manages its own nested MLflow run titled 
             "Feature_Engineering".
         """
+
+        mlflow.set_experiment("Home_Credit_Default_Risk")
+        
         with mlflow.start_run(run_name="Feature_Engineering"):
             # Log input params
             mlflow.log_params({
