@@ -203,9 +203,26 @@ def main():
                 pyfunc_predict_fn="predict_proba"
             )
 
-            # Backup
+            # Backup (full wrapper object)
             joblib.dump(final_model, MODEL_PATH)
             mlflow.log_artifact(str(MODEL_PATH), artifact_path="model_backup")
+
+            # Serving artifact: inner sklearn-compatible estimator + metadata
+            serving_model_path = MODEL_DIR / "serving_model.joblib"
+            joblib.dump(final_model.model, serving_model_path)
+
+            serving_metadata = {
+                "model_type": model_name,
+                "feature_names": final_model.features_,
+                "metrics": metrics,
+                "thresholds": thresholds,
+            }
+            serving_metadata_path = MODEL_DIR / "metadata.json"
+            with open(serving_metadata_path, "w") as f:
+                json.dump(serving_metadata, f, indent=2)
+
+            mlflow.log_artifact(str(serving_model_path), artifact_path="serving")
+            mlflow.log_artifact(str(serving_metadata_path), artifact_path="serving")
 
             mlflow.log_params({
                 "fn_cost": 10.0,
