@@ -67,7 +67,7 @@ def _load_split(data_dir: Path, base: bool) -> tuple[pd.DataFrame, pd.DataFrame,
     return train, holdout, features
 
 
-def _log_shap(model, X: pd.DataFrame, xai_dir: Path, seed: int) -> None:
+def log_explanations(model, X: pd.DataFrame, xai_dir: Path, seed: int) -> None:
     """SHAP global and local explanations of a fitted model, logged to the active run."""
     logger.info("Starting SHAP explainability block...")
     X_sample = X.sample(min(SHAP_SAMPLE_SIZE, len(X)), random_state=seed)
@@ -358,10 +358,7 @@ def _run_training(
                 f"business loss={metrics['holdout_business_loss']:.1f}"
             )
 
-            if model_name == "xgb":
-                logger.info("Skipping SHAP for XGBoost due to known shap library compatibility bugs.")
-            else:
-                _log_shap(final_model, X, xai_dir, seed)
+            log_explanations(final_model, X, xai_dir, seed)
 
             registered_name = f"credit_scoring_{model_name}{suffix}" if register else None
             model_info = mlflow.sklearn.log_model(

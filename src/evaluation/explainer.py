@@ -23,6 +23,7 @@ warnings.filterwarnings("ignore")
 class ModelExplainer:
     def __init__(self, model, X_train: pd.DataFrame, feature_names: list = None, max_background_samples: int = 1000, output_dir: Path = None, *, seed: int):
         self.model = model
+        self.seed = seed
         self.output_dir = output_dir
         self.is_linear_pipeline = False
         self.preprocessor = None
@@ -154,8 +155,7 @@ class ModelExplainer:
                 return shap.Explainer(model.predict_proba, masker)
 
         if isinstance(model, XGBClassifier):
-            logger.info(f"Using TreeExplainer for {type(model).__name__}")
-            return shap.TreeExplainer(model)
+            return self._create_xgb_explainer(model)
 
         if isinstance(model, (LGBMClassifier, CatBoostClassifier)):
             logger.info(f"Using TreeExplainer for {type(model).__name__}")
@@ -167,6 +167,21 @@ class ModelExplainer:
 
         return shap.TreeExplainer(model)
             
+
+    def _create_xgb_explainer(self, model: XGBClassifier):
+        """TreeExplainer on the booster; a model-agnostic explainer if shap cannot parse the booster.
+
+        shap 0.49 fails on boosters saved by xgboost 3.x (`base_score` is stored as '[5E-1]').
+        """
+        try:
+            logger.info("Using TreeExplainer on the XGBoost booster")
+            return shap.TreeExplainer(model.get_booster())
+        except Exception as e:
+            logger.warning(f"TreeExplainer failed for XGBoost ({e}); falling back to a model-agnostic explainer")
+            background = self.X_train.sample(min(200, len(self.X_train)), random_state=self.seed)
+            return shap.Explainer(
+                lambda d: model.predict_proba(d)[:, 1], shap.maskers.Independent(background)
+            )
 
     def explain_local_shap(self, instance: pd.Series, save_path: str = None, max_display: int = 15) -> str:
         if save_path is None:
