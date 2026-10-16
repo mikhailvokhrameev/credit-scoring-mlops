@@ -4,14 +4,27 @@ import pandas as pd
 import mlflow
 import logging
 import re
-from typing import Tuple, Dict, Any, Optional, List
-from sklearn.model_selection import StratifiedKFold
+from dataclasses import dataclass
+from typing import Dict, Any, Optional, List
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_curve
 
-from src.config import load_params
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CVResult:
+    """Outcome of `BaseModel.cross_validate`."""
+    oof: np.ndarray
+    models: List['BaseModel']
+    fold_auc: List[float]
+    best_iterations: List[int]  # 0-based best iteration per fold; empty for non-boosters
+
+    @property
+    def mean_auc(self) -> float:
+        return float(np.mean(self.fold_auc))
 
 
 class BaseModel(abc.ABC):
@@ -86,39 +99,64 @@ class BaseModel(abc.ABC):
         pass
 
 
-    def cross_validate(self, X: pd.DataFrame, y: pd.Series, n_splits: int = 5) -> Tuple[np.ndarray, List['BaseModel']]:
+    def cross_validate(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        n_splits: int,
+        seed: int,
+        early_stopping_rounds: int,
+        es_fraction: float,
+    ) -> 'CVResult':
         """
-        Executes Stratified K-Fold cross-validation, logs metrics to MLflow,
-        and generates Out-Of-Fold (OOF) predictions for stacking.
+        Executes Stratified K-Fold cross-validation and generates Out-Of-Fold (OOF)
+        predictions for stacking.
+
+        For boosters, the train part of every fold is split into `fit` and `es` parts;
+        early stopping watches only `es`, so the validation fold stays untouched and
+        OOF predictions are not optimistically biased. Models without a boosting-rounds
+        parameter (`n_estimators_key is None`) are fitted on the whole train part.
+        Metrics are logged to MLflow only if there is an active run.
 
         Args:
             X (pd.DataFrame): Feature matrix.
             y (pd.Series): Target variable.
             n_splits (int): Number of CV folds.
+            seed (int): Seed for fold and early-stopping splits.
+            early_stopping_rounds (int): Patience of early stopping.
+            es_fraction (float): Share of each fold's train part held out for early stopping.
 
         Returns:
-            Tuple[np.ndarray, List['BaseModel']]: 1D array of OOF probabilities and a list of fitted models.
+            CVResult: OOF probabilities, fitted fold models, fold AUCs and best iterations.
         """
         logger.info(f"Starting {n_splits}-fold Stratified CV for {self.__class__.__name__}")
-        
-        early_stopping_rounds = load_params()["train"]["early_stopping_rounds"]
-        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+
+        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
         oof_preds = np.zeros(len(X))
-        models =[]
-        fold_auc, fold_pr_auc = [],[]
+        models: List['BaseModel'] = []
+        fold_auc, fold_pr_auc, best_iterations = [], [], []
+        log_to_mlflow = mlflow.active_run() is not None
 
         for fold, (train_idx, val_idx) in enumerate(skf.split(X, y)):
-            X_train, y_train = X.iloc[train_idx], y.iloc[train_idx]
             X_val, y_val = X.iloc[val_idx], y.iloc[val_idx]
 
             # Clone instance for the fold
             fold_model = self.__class__(self.params)
-            fold_model.fit(
-                X_train, y_train,
-                eval_set=(X_val, y_val),
-                early_stopping_rounds=early_stopping_rounds,
-            )
-            
+            if self.n_estimators_key is None:
+                fold_model.fit(X.iloc[train_idx], y.iloc[train_idx])
+            else:
+                y_tr = y.iloc[train_idx]
+                fit_idx, es_idx = train_test_split(
+                    train_idx, test_size=es_fraction, stratify=y_tr, random_state=seed
+                )
+                fold_model.fit(
+                    X.iloc[fit_idx], y.iloc[fit_idx],
+                    eval_set=(X.iloc[es_idx], y.iloc[es_idx]),
+                    early_stopping_rounds=early_stopping_rounds,
+                )
+                if fold_model.best_iteration_ is not None:
+                    best_iterations.append(fold_model.best_iteration_)
+
             val_preds = fold_model.predict_proba(X_val)
             oof_preds[val_idx] = val_preds
             models.append(fold_model)
@@ -130,20 +168,34 @@ class BaseModel(abc.ABC):
             fold_pr_auc.append(pr_auc)
 
             logger.info(f"Fold {fold + 1} | ROC AUC: {auc:.4f} | PR AUC: {pr_auc:.4f}")
-            mlflow.log_metrics({f"fold_{fold+1}_auc": auc, f"fold_{fold+1}_pr_auc": pr_auc})
+            if log_to_mlflow:
+                mlflow.log_metrics({f"fold_{fold+1}_auc": auc, f"fold_{fold+1}_pr_auc": pr_auc})
 
-        mean_auc, std_auc = np.mean(fold_auc), np.std(fold_auc)
-        logger.info(f"CV Complete | mean_auc: {mean_auc:.4f}, std_auc: {std_auc:.4f}")
-        
-        mlflow.log_metrics({
-            "cv_mean_roc_auc": mean_auc,
-            "cv_std_roc_auc": std_auc,
-            "cv_mean_pr_auc": np.mean(fold_pr_auc)
-        })
+        result = CVResult(oof=oof_preds, models=models, fold_auc=fold_auc, best_iterations=best_iterations)
+        std_auc = float(np.std(fold_auc))
+        logger.info(f"CV Complete | mean_auc: {result.mean_auc:.4f}, std_auc: {std_auc:.4f}")
 
-        return oof_preds, models
+        if log_to_mlflow:
+            mlflow.log_metrics({
+                "cv_mean_roc_auc": result.mean_auc,
+                "cv_std_roc_auc": std_auc,
+                "cv_mean_pr_auc": float(np.mean(fold_pr_auc)),
+            })
 
-    def optimize_threshold(self, y_true: np.ndarray, y_proba: np.ndarray, fn_cost: float = 10.0, fp_cost: float = 1.0) -> Dict[str, float]:
+        return result
+
+    def refit_params(self, cv: 'CVResult') -> Dict[str, Any]:
+        """Params for the final refit: boosting rounds = median best iteration over folds + 1.
+
+        `best_iteration_` is a 0-based index, hence the +1 to get the tree count.
+        Returns an unchanged copy of `self.params` when the model has no rounds parameter.
+        """
+        params = dict(self.params)
+        if self.n_estimators_key is not None:
+            params[self.n_estimators_key] = int(np.median(cv.best_iterations)) + 1
+        return params
+
+    def optimize_threshold(self, y_true: np.ndarray, y_proba: np.ndarray, fn_cost: float, fp_cost: float) -> Dict[str, float]:
         """
         Finds the optimal probability threshold based on F1-Score and Business Cost.
         
@@ -160,8 +212,10 @@ class BaseModel(abc.ABC):
         
         # Optimize for F1
         f1_scores = 2 * (precision * recall) / (precision + recall + 1e-9)
+        # The last PR-curve point (precision=1, recall=0) has no threshold; exclude it.
+        f1_scores = f1_scores[:-1]
         best_f1_idx = np.argmax(f1_scores)
-        best_f1_threshold = thresholds[best_f1_idx] if best_f1_idx < len(thresholds) else 0.5
+        best_f1_threshold = thresholds[best_f1_idx]
         
         # Optimize for Business Loss
         best_loss_threshold, min_loss = 0.5, float('inf')
@@ -181,5 +235,6 @@ class BaseModel(abc.ABC):
             "best_business_threshold": best_loss_threshold,
             "min_business_loss": min_loss
         }
-        mlflow.log_metrics(metrics)
+        if mlflow.active_run() is not None:
+            mlflow.log_metrics(metrics)
         return metrics

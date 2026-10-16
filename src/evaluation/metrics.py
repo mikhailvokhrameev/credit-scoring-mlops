@@ -95,6 +95,33 @@ def compute_all_metrics(y_true: np.ndarray, y_prob: np.ndarray, prefix: str = ""
     return metrics_with_prefix
 
 
+def evaluate_threshold(
+    y_true: np.ndarray,
+    y_proba: np.ndarray,
+    threshold: float,
+    fn_cost: float,
+    fp_cost: float,
+) -> Dict[str, float]:
+    """
+    Business outcome of a fixed decision threshold (reject when y_proba >= threshold).
+
+    Returns:
+        business_loss = fn * fn_cost + fp * fp_cost, the fn and fp counts,
+        and approval_rate = share of clients with y_proba < threshold.
+    """
+    y_true = np.asarray(y_true)
+    y_proba = np.asarray(y_proba)
+    reject = y_proba >= threshold
+    fn = int(np.sum((y_true == 1) & ~reject))
+    fp = int(np.sum((y_true == 0) & reject))
+    return {
+        "business_loss": float(fn * fn_cost + fp * fp_cost),
+        "fn": fn,
+        "fp": fp,
+        "approval_rate": float(np.mean(~reject)) if len(y_proba) else 0.0,
+    }
+
+
 def compare_models(results_dict: Dict[str, list]) -> Tuple[str, float]:
     """
     Compares models using ONLY mean ROC-AUC across CV folds.

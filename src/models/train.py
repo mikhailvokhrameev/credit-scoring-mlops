@@ -113,9 +113,15 @@ def main():
             # CV training
             final_model = ModelClass(params=best_params)
 
-            oof_preds, cv_models = final_model.cross_validate(
-                X, y, n_splits=args.folds
+            cfg = load_params()
+            cv = final_model.cross_validate(
+                X, y,
+                n_splits=args.folds,
+                seed=cfg["seed"],
+                early_stopping_rounds=cfg["train"]["early_stopping_rounds"],
+                es_fraction=cfg["train"]["early_stopping_fraction"],
             )
+            oof_preds = cv.oof
 
             metrics = compute_all_metrics(
                 y.values,
@@ -134,8 +140,8 @@ def main():
             thresholds = final_model.optimize_threshold(
                 y.values,
                 oof_preds,
-                fn_cost=10.0,
-                fp_cost=1.0,
+                fn_cost=cfg["business"]["fn_cost"],
+                fp_cost=cfg["business"]["fp_cost"],
             )
 
             mlflow.log_dict(thresholds, "inference/thresholds.json")
