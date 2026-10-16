@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from mlflow.exceptions import MlflowException
+from mlflow.protos.databricks_pb2 import ErrorCode, INVALID_PARAMETER_VALUE, RESOURCE_DOES_NOT_EXIST
 from mlflow.tracking import MlflowClient
 
 from src.config import load_params
@@ -18,11 +19,18 @@ AUC_METRIC = "holdout_roc_auc"
 DI_METRIC = "holdout_fairness_min_di"
 
 
+# MLflow 3.x signals a missing alias with INVALID_PARAMETER_VALUE and a missing model with
+# RESOURCE_DOES_NOT_EXIST; any other registry error must propagate rather than look like "no champion".
+_NOT_FOUND_CODES = {INVALID_PARAMETER_VALUE, RESOURCE_DOES_NOT_EXIST}
+
+
 def _alias_version(client: MlflowClient, name: str, alias: str):
     try:
         return client.get_model_version_by_alias(name, alias)
-    except MlflowException:
-        return None
+    except MlflowException as e:
+        if e.error_code in {ErrorCode.Name(c) for c in _NOT_FOUND_CODES}:
+            return None
+        raise
 
 
 def _finite_metric(client: MlflowClient, version, metric: str, role: str) -> float | None:

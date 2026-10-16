@@ -3,6 +3,8 @@ import sys
 
 import mlflow
 import pytest
+from mlflow.exceptions import MlflowException
+from mlflow.protos.databricks_pb2 import INTERNAL_ERROR
 from mlflow.tracking import MlflowClient
 
 from src.models import promote as promote_module
@@ -79,6 +81,27 @@ def test_challenger_within_epsilon_promoted(client, params):
     v = _register(client, auc=0.776, min_di=0.9, alias="challenger")
     assert promote(NAME, params, client) is True
     assert _champion(client) == v
+
+
+def test_unfair_challenger_without_champion_rejected(client, params):
+    _register(client, auc=0.80, min_di=0.6, alias="challenger")
+    assert promote(NAME, params, client) is False
+    assert _champion(client) is None
+
+
+def test_unexpected_registry_error_propagates(client, params, monkeypatch):
+    _register(client, auc=0.80, min_di=0.9, alias="challenger")
+    real = client.get_model_version_by_alias
+
+    def flaky(name, alias):
+        if alias == "champion":
+            raise MlflowException("registry down", error_code=INTERNAL_ERROR)
+        return real(name, alias)
+
+    monkeypatch.setattr(client, "get_model_version_by_alias", flaky)
+    with pytest.raises(MlflowException, match="registry down"):
+        promote(NAME, params, client)
+    assert _champion(MlflowClient(params["mlflow"]["tracking_uri"])) is None  # unpatched client
 
 
 def test_nan_min_di_fails_closed(client, params, caplog):
