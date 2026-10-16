@@ -53,10 +53,20 @@ def fairness_report(
     return report
 
 
-def fairness_summary(report: pd.DataFrame) -> dict[str, float]:
-    """Disparate impact ratio (min/max approval rate) and equal opportunity gap; NaN groups are ignored."""
-    approval = report["approval_rate"].dropna()
-    good = report["good_approval_rate"].dropna()
+def fairness_summary(report: pd.DataFrame, min_group_size: int) -> dict[str, float]:
+    """Disparate impact ratio (min/max approval rate) and equal opportunity gap.
+
+    Groups with n < min_group_size (named in a warning) and NaN rates are excluded from both
+    numbers; they stay in the report table. An undefined value is NaN.
+    """
+    small = report.index[report["n"] < min_group_size]
+    if len(small):
+        logger.warning(
+            f"Fairness groups {list(small)} have fewer than {min_group_size} rows and are excluded from the summary"
+        )
+    kept = report[report["n"] >= min_group_size]
+    approval = kept["approval_rate"].dropna()
+    good = kept["good_approval_rate"].dropna()
     di_ratio = float(approval.min() / approval.max()) if len(approval) and approval.max() > 0 else float("nan")
     eo_gap = float(good.max() - good.min()) if len(good) else float("nan")
     return {"di_ratio": di_ratio, "eo_gap": eo_gap}

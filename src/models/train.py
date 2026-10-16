@@ -101,7 +101,7 @@ def _log_shap(model, X: pd.DataFrame, xai_dir: Path, seed: int) -> None:
 
 def _log_guardrails(
     holdout_df: pd.DataFrame, y_holdout: np.ndarray, p_holdout: np.ndarray,
-    threshold: float, guardrail_dir: Path,
+    threshold: float, min_group_size: int, guardrail_dir: Path,
 ) -> dict[str, float]:
     """Log calibration and fairness guardrails of the holdout predictions.
 
@@ -121,11 +121,15 @@ def _log_guardrails(
     for attr, groups in attributes.items():
         report = fairness_report(y_holdout, p_holdout, groups, threshold)
         report.to_csv(guardrail_dir / f"fairness_{attr}.csv")
-        summary = fairness_summary(report)
+        summary = fairness_summary(report, min_group_size)
         fairness[f"holdout_fairness_{attr}_di_ratio"] = summary["di_ratio"]
         fairness[f"holdout_fairness_{attr}_eo_gap"] = summary["eo_gap"]
+        if np.isnan(summary["di_ratio"]):
+            logger.warning(f"Disparate impact ratio for '{attr}' is undefined (NaN); it is left out of min_di")
     ratios = [v for k, v in fairness.items() if k.endswith("_di_ratio") and not np.isnan(v)]
     fairness["holdout_fairness_min_di"] = min(ratios) if ratios else float("nan")
+    if np.isnan(fairness["holdout_fairness_min_di"]):
+        logger.warning("holdout_fairness_min_di is NaN: no attribute has a defined disparate impact ratio")
 
     mlflow.log_metrics(fairness)
     mlflow.log_artifacts(str(guardrail_dir), artifact_path="guardrails")
@@ -284,7 +288,8 @@ def _run_training(
             metrics |= holdout_business
             metrics |= _log_guardrails(
                 holdout_df, y_holdout.values, p_holdout,
-                thresholds["best_business_threshold"], model_dir / "guardrails",
+                thresholds["best_business_threshold"], params["fairness"]["min_group_size"],
+                model_dir / "guardrails",
             )
             metrics = {k: float(v) for k, v in metrics.items()}
             logger.info(

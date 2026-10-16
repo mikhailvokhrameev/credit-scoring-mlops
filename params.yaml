@@ -26,6 +26,7 @@ monitoring:
   psi_top_k: 20
 fairness:
   di_min: 0.8
+  min_group_size: 30            # groups smaller than this are reported but excluded from DI/EO
 gate:
   auc_epsilon: 0.005
   fixture_auc_min: 0.70
