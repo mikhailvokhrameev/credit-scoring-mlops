@@ -63,6 +63,11 @@ def synthetic_df(n: int = 500, seed: int = 0) -> pd.DataFrame:
     return df
 
 
+def features(df: pd.DataFrame) -> pd.DataFrame:
+    """Model input: every column except ids, target and the protected attribute."""
+    return df.drop(columns=[*NON_FEATURE_COLUMNS, *PROTECTED_COLUMNS])
+
+
 @pytest.fixture
 def synth() -> pd.DataFrame:
     return synthetic_df()

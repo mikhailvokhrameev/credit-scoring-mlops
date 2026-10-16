@@ -1,9 +1,8 @@
 import xgboost as xgb
 import pandas as pd
 import numpy as np
-import mlflow.xgboost
-import re
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from src.config import load_params
 from src.models.base import BaseModel
 
 
@@ -12,73 +11,44 @@ class XGBModel(BaseModel):
     XGBoost implementation. Automatically utilizes CUDA device if available.
     Adjusts scale_pos_weight for imbalanced learning contexts.
     """
-    def _sanitize_columns(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Removes special characters from column names to comply with XGBoost constraints"""
-        X = X.copy()
-        X.columns = [
-            re.sub(r"[^0-9a-zA-Z_]+", "_", str(c))
-            for c in X.columns
-        ]
-        return X
+    n_estimators_key = "n_estimators"
 
-
-    def _align_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Ensures inference data has the exact same columns as training data"""
-        X = X.copy()
-
-        if not hasattr(self, "features_"):
-            raise ValueError("Model is not fitted yet (features_ not found)")
-
-        missing = set(self.features_) - set(X.columns)
-        for col in missing:
-            X[col] = 0
-
-        return X[self.features_]
-    
-    
-    def transform(self, X):
+    def fit(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        eval_set=None,
+        early_stopping_rounds: Optional[int] = None,
+    ) -> 'XGBModel':
         X = self._sanitize_columns(X)
-        X = self._align_features(X)
-        return X
-
-
-    def fit(self, X: pd.DataFrame, y: pd.Series, eval_set = None) -> 'XGBModel':
-        # Sanitize features
-        X = self._sanitize_columns(X)
-        
-        if eval_set is not None:
-            eval_set = (self._sanitize_columns(eval_set[0]), eval_set[1])
-
         self.features_ = list(X.columns)
-        
-        # Calculate optimal class weight if not explicitly provided
-        if 'scale_pos_weight' not in self.params:
-            pos_ratio = (len(y) - y.sum()) / y.sum()
-            self.params['scale_pos_weight'] = pos_ratio
-            
-        device = self.params.get('device', 'cpu')
-        
-        if device == 'gpu':
-            self.params['tree_method'] = 'hist'
-            self.params['device'] = 'cuda'
-        else:
-            self.params['tree_method'] = 'hist'
-            self.params['device'] = 'cpu'
 
-        self.model = xgb.XGBClassifier(**self.params, early_stopping_rounds=100 if eval_set else None)
-        
-        eval_data = [(eval_set[0], eval_set[1])] if eval_set else None
-        
-        mlflow.xgboost.autolog()
+        params = dict(self.params)
+
+        # Calculate optimal class weight if not explicitly provided
+        if 'scale_pos_weight' not in params:
+            params['scale_pos_weight'] = (len(y) - y.sum()) / y.sum()
+
+        params['tree_method'] = 'hist'
+        params['device'] = 'cuda' if params.get('device', 'cpu') == 'gpu' else 'cpu'
+
+        use_early_stopping = eval_set is not None and early_stopping_rounds is not None
+        eval_data = None
+        if eval_set is not None:
+            eval_data = [(self._sanitize_columns(eval_set[0])[self.features_], eval_set[1])]
+
+        self.model = xgb.XGBClassifier(
+            **params,
+            early_stopping_rounds=early_stopping_rounds if use_early_stopping else None,
+        )
         self.model.fit(X, y, eval_set=eval_data, verbose=False)
-        
+        self.best_iteration_ = int(self.model.best_iteration) if use_early_stopping else None
+
         return self
-    
+
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        # Sanitize and align internally before predicting
-        X = self._sanitize_columns(X)
-        X = self._align_features(X)
+        X = self.transform(X)
         return self.model.predict_proba(X)[:, 1]
 
 
@@ -92,5 +62,5 @@ class XGBModel(BaseModel):
             "subsample": trial.suggest_float("subsample", 0.5, 1.0),
             "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
             "eval_metric": "auc",
-            "random_state": 42
+            "random_state": load_params()["seed"]
         }

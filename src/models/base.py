@@ -3,9 +3,12 @@ import numpy as np
 import pandas as pd
 import mlflow
 import logging
+import re
 from typing import Tuple, Dict, Any, Optional, List
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_curve
+
+from src.config import load_params
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -19,6 +22,8 @@ class BaseModel(abc.ABC):
     Integrates MLflow for experiment tracking and provides threshold optimization
     utilities specifically tailored for business metrics (e.g., cost of default).
     """
+    n_estimators_key: Optional[str] = None  # name of the boosting-rounds param, None if not applicable
+
     def __init__(self, params: Optional[Dict[str, Any]] = None):
         """
         Args:
@@ -26,12 +31,46 @@ class BaseModel(abc.ABC):
         """
         self.params = params or {}
         self.model = None
-        self.features_: List[str] =[]
+        self.features_: List[str] = []
+        self.best_iteration_: Optional[int] = None
 
     @abc.abstractmethod
-    def fit(self, X: pd.DataFrame, y: pd.Series, eval_set = None) -> 'BaseModel':
-        """Fits the model to the training data"""
+    def fit(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        eval_set=None,
+        early_stopping_rounds: Optional[int] = None,
+    ) -> 'BaseModel':
+        """Fits the model to the training data.
+
+        Early stopping is active only when both `eval_set` and `early_stopping_rounds`
+        are given. Must not modify `self.params`.
+        """
         pass
+
+    def _sanitize_columns(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Replaces special characters in column names (LightGBM/XGBoost constraints)."""
+        X = X.copy()
+        X.columns = [re.sub(r"[^0-9a-zA-Z_]+", "_", str(c)) for c in X.columns]
+        return X
+
+    def _align_features(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Selects the training columns in training order; extra columns are dropped.
+
+        Raises:
+            ValueError: if the model is not fitted or any training feature is missing.
+        """
+        if not self.features_:
+            raise ValueError("Model is not fitted yet (features_ not found)")
+        missing = set(self.features_) - set(X.columns)
+        if missing:
+            raise ValueError(f"Missing features at inference: {sorted(missing)}")
+        return X[self.features_]
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Sanitizes column names and aligns to the training feature set."""
+        return self._align_features(self._sanitize_columns(X))
 
     @abc.abstractmethod
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
@@ -60,6 +99,7 @@ class BaseModel(abc.ABC):
         """
         logger.info(f"Starting {n_splits}-fold Stratified CV for {self.__class__.__name__}")
         
+        early_stopping_rounds = load_params()["train"]["early_stopping_rounds"]
         skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
         oof_preds = np.zeros(len(X))
         models =[]
@@ -71,7 +111,11 @@ class BaseModel(abc.ABC):
 
             # Clone instance for the fold
             fold_model = self.__class__(self.params)
-            fold_model.fit(X_train, y_train, eval_set=(X_val, y_val))
+            fold_model.fit(
+                X_train, y_train,
+                eval_set=(X_val, y_val),
+                early_stopping_rounds=early_stopping_rounds,
+            )
             
             val_preds = fold_model.predict_proba(X_val)
             oof_preds[val_idx] = val_preds
@@ -137,7 +181,3 @@ class BaseModel(abc.ABC):
         }
         mlflow.log_metrics(metrics)
         return metrics
-    
-    
-    def transform(self, X):
-        raise NotImplementedError

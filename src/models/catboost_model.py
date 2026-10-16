@@ -1,8 +1,8 @@
 import catboost as cb
 import pandas as pd
 import numpy as np
-import re
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from src.config import load_params
 from src.models.base import BaseModel
 
 
@@ -11,51 +11,26 @@ class CatBoostModel(BaseModel):
     CatBoost implementation optimized for native categorical feature handling.
     Employs 'Balanced' auto class weights for imbalanced datasets.
     """
-    def _sanitize_columns(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Removes special characters from column names"""
-        X = X.copy()
-        X.columns = [
-            re.sub(r"[^0-9a-zA-Z_]+", "_", str(c))
-            for c in X.columns
-        ]
-        return X
+    n_estimators_key = "iterations"
 
-
-    def _align_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        X = X.copy()
-
-        if not hasattr(self, "features_"):
-            raise ValueError("Model is not fitted yet")
-
-        # Add missing columns
-        missing = set(self.features_) - set(X.columns)
-        for col in missing:
-            X[col] = 0
-
-        # Enforce exact order
-        return X.reindex(columns=self.features_)
-    
-    
-    def transform(self, X):
+    def fit(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        eval_set=None,
+        early_stopping_rounds: Optional[int] = None,
+    ) -> 'CatBoostModel':
         X = self._sanitize_columns(X)
-        X = self._align_features(X)
-        return X
-
-
-    def fit(self, X: pd.DataFrame, y: pd.Series, eval_set=None) -> 'CatBoostModel':
-        X = self._sanitize_columns(X)
-
-        if eval_set is not None:
-            eval_set = (
-                self._sanitize_columns(eval_set[0]),
-                eval_set[1]
-            )
-
         self.features_ = X.columns.tolist()
+
+        eval_data = None
+        if eval_set is not None:
+            eval_data = (self._sanitize_columns(eval_set[0])[self.features_], eval_set[1])
+        use_early_stopping = eval_data is not None and early_stopping_rounds is not None
 
         cat_features = [col for col in X.columns if X[col].dtype.name in ['object', 'category']]
 
-        fit_params = self.params.copy()
+        fit_params = dict(self.params)
 
         device = fit_params.pop('device', 'cpu').upper()
         if device == 'GPU':
@@ -69,21 +44,18 @@ class CatBoostModel(BaseModel):
         fit_params.setdefault('allow_writing_files', False)
 
         self.model = cb.CatBoostClassifier(**fit_params)
-
-        eval_data = (eval_set[0], eval_set[1]) if eval_set else None
-
         self.model.fit(
             X, y,
             eval_set=eval_data,
             cat_features=cat_features,
-            early_stopping_rounds=100 if eval_set else None
+            early_stopping_rounds=early_stopping_rounds if use_early_stopping else None,
         )
+        self.best_iteration_ = int(self.model.get_best_iteration()) if use_early_stopping else None
         return self
 
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        X = self._sanitize_columns(X)
-        X = self._align_features(X)
+        X = self.transform(X)
         return self.model.predict_proba(X)[:, 1]
 
 
@@ -95,5 +67,5 @@ class CatBoostModel(BaseModel):
             "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1e-3, 10.0, log=True),
             "border_count": trial.suggest_int("border_count", 32, 255),
             "eval_metric": "AUC",
-            "random_seed": 42
+            "random_seed": load_params()["seed"]
         }
