@@ -83,7 +83,8 @@ def write_feature_sets(
 
     Columns in `exclude` are dropped from the selected list (they are never model
     inputs) but columns in `protected` are kept in all three parquet files so that
-    fairness checks can use them. TARGET is dropped from the test frame.
+    fairness checks can use them; ValueError if a protected column is missing from
+    any frame. TARGET is dropped from the test frame.
 
     Returns:
         list[str]: The final selected feature list written to selected_features.json.
@@ -92,7 +93,10 @@ def write_feature_sets(
     output_dir.mkdir(parents=True, exist_ok=True)
     selected = [c for c in selected if c not in exclude]
     keep = ['SK_ID_CURR', 'TARGET'] + selected
-    keep += [c for c in protected if c not in keep and c in train.columns]
+    missing = sorted({c for c in protected for f in (train, holdout, test) if c not in f.columns})
+    if missing:
+        raise ValueError(f"Protected columns missing from the feature frames: {missing}")
+    keep += [c for c in protected if c not in keep]
 
     train[keep].to_parquet(output_dir / "train_features.parquet", index=False)
     holdout[keep].to_parquet(output_dir / "holdout_features.parquet", index=False)
@@ -368,7 +372,7 @@ class FeatureEngineeringPipeline:
 
         logger.info(f"Saved train/holdout/test ({len(train)}/{len(holdout)}/{len(test)}) to {self.output_dir}")
         keep = ['SK_ID_CURR', 'TARGET'] + selected
-        keep += [c for c in feats["protected"] if c not in keep and c in df.columns]
+        keep += [c for c in feats["protected"] if c not in keep]
         return df[keep]
 
 

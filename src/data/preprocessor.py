@@ -6,6 +6,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+MISSING_CATEGORY = "__MISSING__"
+
 
 def one_hot_encoder(train: pd.DataFrame, test: pd.DataFrame) -> tuple:
     """
@@ -232,8 +234,10 @@ class ApplicationPreprocessor:
         Applies Label Encoding strictly fitting on train data.
         
         Maps string categories to integers. To prevent leakage, the encoder is fitted 
-        only on the train set. Unseen categories in the test set are explicitly mapped 
-        to a safe 'UNKNOWN' class to avoid transform errors.
+        only on the train set. Missing values form their own category in both sets
+        (a missing value in the test set gets the train code of missing). Unseen
+        categories in the test set are explicitly mapped to a safe 'UNKNOWN' class
+        to avoid transform errors.
         
         Args:
             train (pd.DataFrame): Training dataset.
@@ -248,6 +252,10 @@ class ApplicationPreprocessor:
         cat_cols = [col for col in train.columns if train[col].dtype == 'object']
         
         for col in cat_cols:
+            # Missing is a real category, encoded the same way in fit and rest
+            train[col] = train[col].fillna(MISSING_CATEGORY)
+            test[col] = test[col].fillna(MISSING_CATEGORY)
+
             le = LabelEncoder()
             le.fit(train[col])
             train[col] = le.transform(train[col])
