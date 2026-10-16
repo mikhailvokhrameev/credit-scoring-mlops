@@ -4,6 +4,8 @@ import mlflow
 import pytest
 
 from src.config import load_params
+from src.models.base import CVResult
+from src.models.lgbm_model import LGBMModel
 from src.models.logreg_model import LogRegModel
 from src.models.tuner import OptunaHPOTuner, make_study_name
 from tests.conftest import features
@@ -41,3 +43,19 @@ def test_optimize_returns_best_with_base_params(tmp_path, synth):
     assert "C" in result
     assert result["device"] == "cpu"
     assert mlflow.active_run() is None
+
+
+def test_base_params_reach_search_space(tmp_path, synth, monkeypatch):
+    X, y = features(synth), synth["TARGET"]
+    seen = []
+
+    def fake_cv(self, X, y, **kwargs):
+        seen.append(dict(self.params))
+        return CVResult(oof=None, models=[], fold_auc=[0.5], best_iterations=[])
+
+    monkeypatch.setattr(LGBMModel, "cross_validate", fake_cv)
+    t = OptunaHPOTuner(LGBMModel, f"sqlite:///{tmp_path}/o.db", "s", 42, {"device": "gpu"})
+    result = t.optimize(X, y, n_trials=1, timeout=60, cv_kwargs=CV_KWARGS)
+    assert seen[0]["device_type"] == "gpu"
+    assert result["device_type"] == "gpu"
+    assert result["device"] == "gpu"

@@ -70,7 +70,7 @@ class OptunaHPOTuner:
         def objective(trial):
             with mlflow.start_run(nested=True, run_name=f"trial_{trial.number}"):
                 try:
-                    params = self.model_class().get_optuna_space(trial) | self.base_params
+                    params = self.model_class(dict(self.base_params)).get_optuna_space(trial) | self.base_params
                     trial.set_user_attr("params", params)
                     mlflow.log_params(params)
                     model = self.model_class(params)
