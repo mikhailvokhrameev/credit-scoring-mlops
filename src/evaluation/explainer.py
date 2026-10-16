@@ -8,6 +8,7 @@ import pandas as pd
 
 import matplotlib.pyplot as plt
 
+import xgboost as xgb
 from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
@@ -18,6 +19,23 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
+
+
+def _native_xgb_explainer(booster: xgb.Booster):
+    """Callable with the `shap.TreeExplainer` call interface, backed by XGBoost's exact `pred_contribs`.
+
+    Values are in log-odds, like TreeExplainer on the other boosters. Extra keyword arguments
+    (`check_additivity`, `max_evals`) are accepted and ignored.
+    """
+    def explain(X: pd.DataFrame, **_ignored) -> shap.Explanation:
+        contribs = booster.predict(xgb.DMatrix(X), pred_contribs=True)
+        return shap.Explanation(
+            values=contribs[:, :-1],
+            base_values=contribs[:, -1],
+            data=X.values,
+            feature_names=X.columns.tolist(),
+        )
+    return explain
 
 
 class ModelExplainer:
@@ -169,19 +187,31 @@ class ModelExplainer:
             
 
     def _create_xgb_explainer(self, model: XGBClassifier):
-        """TreeExplainer on the booster; a model-agnostic explainer if shap cannot parse the booster.
+        """Exact TreeSHAP for XGBoost, in three steps, each logged when it fails.
 
-        shap 0.49 fails on boosters saved by xgboost 3.x (`base_score` is stored as '[5E-1]').
+        1. `shap.TreeExplainer` on the booster;
+        2. native `pred_contribs` of the booster (exact, log-odds), used when shap cannot parse the
+           booster: shap 0.49 fails on boosters saved by xgboost 3.x (`base_score` is '[5E-1]');
+        3. a model-agnostic permutation explainer on probabilities, the last resort (slow, approximate).
         """
+        booster = model.get_booster()
         try:
             logger.info("Using TreeExplainer on the XGBoost booster")
-            return shap.TreeExplainer(model.get_booster())
+            return shap.TreeExplainer(booster)
         except Exception as e:
-            logger.warning(f"TreeExplainer failed for XGBoost ({e}); falling back to a model-agnostic explainer")
-            background = self.X_train.sample(min(200, len(self.X_train)), random_state=self.seed)
-            return shap.Explainer(
-                lambda d: model.predict_proba(d)[:, 1], shap.maskers.Independent(background)
-            )
+            logger.warning(f"TreeExplainer failed for XGBoost ({e}); using native booster TreeSHAP")
+
+        try:
+            explain = _native_xgb_explainer(booster)
+            explain(self.X_train.head(1))  # fail here, not in the middle of the training run
+            return explain
+        except Exception as e:
+            logger.warning(f"Native XGBoost TreeSHAP failed ({e}); falling back to a model-agnostic explainer")
+
+        background = self.X_train.sample(min(200, len(self.X_train)), random_state=self.seed)
+        return shap.Explainer(
+            lambda d: model.predict_proba(d)[:, 1], shap.maskers.Independent(background), seed=self.seed
+        )
 
     def explain_local_shap(self, instance: pd.Series, save_path: str = None, max_display: int = 15) -> str:
         if save_path is None:
