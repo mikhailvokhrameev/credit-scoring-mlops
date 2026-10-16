@@ -32,7 +32,6 @@ def test_stable_hash_order_independent():
     assert stable_hash({"a": 1, "b": 2}) == stable_hash({"b": 2, "a": 1})
 
 
-@pytest.mark.xfail(strict=False, reason="models/train migrated in Tasks 3-7")
 def test_no_hardcoded_seed_in_src():
     hits = [
         p for p in (ROOT / "src").rglob("*.py")
