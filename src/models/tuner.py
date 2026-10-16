@@ -1,92 +1,105 @@
-import optuna
-import mlflow
-import pandas as pd
+import hashlib
 import logging
-from optuna.pruners import HyperbandPruner
-from optuna.samplers import TPESampler
 from typing import Type
-from src.config import load_params
+
+import mlflow
+import optuna
+import pandas as pd
+from optuna.samplers import TPESampler
+from optuna.trial import TrialState
+
+from src.config import stable_hash
 from src.models.base import BaseModel
 
 logger = logging.getLogger(__name__)
+
+CONFIG_SECTIONS = ("seed", "features", "hpo", "train")
+
+
+def data_fingerprint(X: pd.DataFrame, y: pd.Series) -> str:
+    """sha256 over the values of X, its column names and the values of y."""
+    h = hashlib.sha256()
+    h.update(pd.util.hash_pandas_object(X, index=False).values.tobytes())
+    h.update(repr(list(X.columns)).encode("utf-8"))
+    h.update(pd.util.hash_pandas_object(y, index=False).values.tobytes())
+    return h.hexdigest()
+
+
+def make_study_name(model_name: str, X: pd.DataFrame, y: pd.Series, params: dict) -> str:
+    """Study name unique per model, training data and the config sections that shape HPO."""
+    config_hash = stable_hash({k: params[k] for k in CONFIG_SECTIONS})
+    return f"{model_name}_{data_fingerprint(X, y)[:8]}_{config_hash[:8]}"
 
 
 class OptunaHPOTuner:
     """
     Unified Optuna Hyperparameter Optimization Tuner for all BaseModel instances.
     Integrates with SQLite for resume capability and optuna-dashboard.
-    Employs Hyperband pruning to early-stop unpromising trials.
+    The study name is expected to be unique per data and config (see make_study_name),
+    so an existing study with the same name is a resumable run of the same experiment.
     """
-    def __init__(self, model_class: Type[BaseModel], db_path: str = "sqlite:///optuna.db", study_name: str = "credit_scoring_hpo"):
+    def __init__(self, model_class: Type[BaseModel], storage: str, study_name: str, seed: int, base_params: dict):
         self.model_class = model_class
-        self.db_path = db_path
+        self.storage = storage
         self.study_name = study_name
+        self.base_params = base_params
         self.study = optuna.create_study(
             direction="maximize",
             study_name=self.study_name,
-            storage=self.db_path,
+            storage=self.storage,
             load_if_exists=True,
-            sampler=TPESampler(seed=42),
-            pruner=HyperbandPruner(min_resource=1, max_resource=10, reduction_factor=3)
+            sampler=TPESampler(seed=seed),
         )
 
-    def optimize(self, X: pd.DataFrame, y: pd.Series, n_trials: int = 50, timeout: int = 3600, n_jobs: int = 1):
+    def optimize(self, X: pd.DataFrame, y: pd.Series, n_trials: int, timeout: int, cv_kwargs: dict) -> dict:
         """
-        Executes the optimization loop.
-        
+        Executes the optimization loop and returns the best params (usable directly as model params).
+
         Args:
             X (pd.DataFrame): Training features.
             y (pd.Series): Target variable.
             n_trials (int): Number of trials to run.
             timeout (int): Timeout in seconds.
-            n_jobs (int): Number of parallel processes.
+            cv_kwargs (dict): Keyword args of BaseModel.cross_validate other than X, y.
+
+        Raises:
+            RuntimeError: if no trial completed.
         """
         logger.info(f"Starting HPO for {self.model_class.__name__}. Study: {self.study_name}")
 
         def objective(trial):
             with mlflow.start_run(nested=True, run_name=f"trial_{trial.number}"):
-                # Instantiate model to extract search space dynamically
-                dummy_model = self.model_class()
-                params = dummy_model.get_optuna_space(trial)
-                
-                mlflow.log_params(params)
-                
-                model = self.model_class(params)
-                
-                # Perform CV to evaluate hyperparameter set
                 try:
-                    cfg = load_params()
-                    cv = model.cross_validate(
-                        X, y,
-                        n_splits=cfg["hpo"]["n_splits"],
-                        seed=cfg["seed"],
-                        early_stopping_rounds=cfg["train"]["early_stopping_rounds"],
-                        es_fraction=cfg["train"]["early_stopping_fraction"],
-                    )
-                    return cv.mean_auc
-                except optuna.TrialPruned:
-                    mlflow.set_tag("status", "pruned")
-                    raise
+                    params = self.model_class().get_optuna_space(trial) | self.base_params
+                    trial.set_user_attr("params", params)
+                    mlflow.log_params(params)
+                    model = self.model_class(params)
+                    return model.cross_validate(X, y, **cv_kwargs).mean_auc
                 except Exception as e:
-                    logger.error(f"Trial failed: {str(e)}")
-                    raise optuna.TrialPruned()
+                    logger.exception(f"Trial {trial.number} failed")
+                    trial.set_user_attr("error", f"{type(e).__name__}: {e}")
+                    mlflow.set_tag("status", "failed")
+                    raise
 
-        self.study.optimize(objective, n_trials=n_trials, timeout=timeout, n_jobs=n_jobs)
-        
-        self._log_best_results()
+        self.study.optimize(objective, n_trials=n_trials, timeout=timeout, catch=(Exception,))
 
+        if not any(t.state == TrialState.COMPLETE for t in self.study.trials):
+            msg = next((t.user_attrs["error"] for t in self.study.trials if "error" in t.user_attrs), "unknown")
+            raise RuntimeError(f"All {n_trials} HPO trials failed; first error: {msg}")
+
+        if mlflow.active_run() is not None:
+            self._log_best_results()
+
+        best = self.study.best_trial.user_attrs.get("params", self.study.best_params)
+        return best | self.base_params
 
     def _log_best_results(self):
-        """Logs the best parameters and hyperparameter importance to MLflow"""
-        if self.study.best_trial is None or len(self.study.trials) == 0:
-            logger.warning("No successful Optuna trials found.")
-            return
-
+        """Logs the best parameters and hyperparameter importance to the active MLflow run"""
         logger.info(f"Best Trial: {self.study.best_trial.number} | AUC: {self.study.best_value:.4f}")
-        
+
         mlflow.log_params({f"best_{k}": v for k, v in self.study.best_params.items()})
         mlflow.log_metric("best_cv_auc", self.study.best_value)
-            
+
         try:
             importances = optuna.importance.get_param_importances(self.study)
             mlflow.log_dict(importances, "param_importances.json")

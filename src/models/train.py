@@ -16,7 +16,7 @@ from src.models.lgbm_model import LGBMModel
 from src.models.xgb_model import XGBModel 
 from src.models.catboost_model import CatBoostModel
 
-from src.models.tuner import OptunaHPOTuner
+from src.models.tuner import OptunaHPOTuner, make_study_name
 from src.evaluation.metrics import compute_all_metrics
 from src.config import load_params
 from src.evaluation.explainer import ModelExplainer
@@ -90,14 +90,29 @@ def main():
         # HPO
         with mlflow.start_run(run_name="HPO", nested=True):
 
-            tuner = OptunaHPOTuner(model_class=ModelClass, db_path=f"sqlite:///{(ROOT / 'optuna.db').as_posix()}", study_name=f"{model_name}_hyperopt")
+            cfg = load_params()
+            study_name = make_study_name(model_name, X, y, cfg)
+            tuner = OptunaHPOTuner(
+                ModelClass,
+                f"sqlite:///{(ROOT / 'optuna.db').as_posix()}",
+                study_name,
+                cfg["seed"],
+                base_params,
+            )
 
             if args.trials > 0:
                 logger.info(f"Starting {args.trials} HPO trials for {model_name}...")
-                tuner.optimize(X, y, n_trials=args.trials)
-                best_params = tuner.study.best_params
-                best_params = tuner.study.best_params
-                best_params.update(base_params) 
+                best_params = tuner.optimize(
+                    X, y,
+                    n_trials=args.trials,
+                    timeout=cfg["hpo"]["timeout"],
+                    cv_kwargs=dict(
+                        n_splits=cfg["hpo"]["n_splits"],
+                        seed=cfg["seed"],
+                        early_stopping_rounds=cfg["train"]["early_stopping_rounds"],
+                        es_fraction=cfg["train"]["early_stopping_fraction"],
+                    ),
+                )
                 logger.info(f"Best params found: {best_params}")
             else:
                 logger.info("Skipping HPO — using default parameters.")
