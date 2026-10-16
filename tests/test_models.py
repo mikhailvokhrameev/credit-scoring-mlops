@@ -72,7 +72,7 @@ def test_best_iteration_set_with_eval_set(cls, synth):
         assert 0 <= it < N_ESTIMATORS
         # best_iteration_ is the 0-based index for every booster
         if cls is LGBMModel:
-            assert it + 1 == m.model.booster_.num_trees()
+            assert it + 1 == m.model.best_iteration_
         elif cls is CatBoostModel:
             assert it + 1 == m.model.tree_count_
         else:
@@ -89,3 +89,13 @@ def test_n_estimators_key():
     assert XGBModel.n_estimators_key == "n_estimators"
     assert CatBoostModel.n_estimators_key == "iterations"
     assert LogRegModel.n_estimators_key is None
+
+
+def test_lgbm_best_iteration_when_early_stopping_never_triggers(synth):
+    X, y = features(synth), synth["TARGET"]
+    params = small_params(LGBMModel) | {"n_estimators": 20}
+    m = LGBMModel(params).fit(
+        X.iloc[:400], y.iloc[:400], eval_set=(X.iloc[400:], y.iloc[400:]), early_stopping_rounds=1000
+    )
+    assert 0 <= m.best_iteration_ < 20
+    assert m.best_iteration_ + 1 == m.model.best_iteration_
