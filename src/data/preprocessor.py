@@ -136,7 +136,7 @@ def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: 
     return train_encoded, test_encoded
 
 
-def process_side_table(df, train_ids, preprocessor, table_name, cardinality_threshold):
+def process_side_table(df, fit_ids, preprocessor, table_name, cardinality_threshold):
     """
     Cleans and encodes child tables while strictly preventing data leakage.
 
@@ -147,17 +147,18 @@ def process_side_table(df, train_ids, preprocessor, table_name, cardinality_thre
 
     The process follows these steps:
     1. Fixes domain-specific anomalies using the provided stateless preprocessor.
-    2. Splits the table into training and testing segments based on the 
-        'SK_ID_CURR' identifiers present in the main application training set.
+    2. Splits the table into a fit segment (rows whose 'SK_ID_CURR' is in
+        `fit_ids`) and a transform-only segment (everything else: holdout and
+        Kaggle test rows).
     3. Reduces categorical cardinality by grouping rare categories into 
-        an 'Other' label, fitting only on the training segment.
+        an 'Other' label, fitting only on the fit segment.
     4. Applies One-Hot Encoding, ensuring the encoder is fitted strictly on 
-        training data to prevent the model from learning test-only categories.
+        the fit segment so holdout/test-only categories are never learned.
 
     Args:
         df (pd.DataFrame): The raw child table to process.
-        train_ids (np.array or list): List of 'SK_ID_CURR' identifiers belonging 
-            to the training set.
+        fit_ids (np.array or list): 'SK_ID_CURR' identifiers the encoders may
+            be fitted on: the application train ids minus the holdout ids.
         preprocessor (object): A preprocessor instance (e.g., PreviousPreprocessor) 
             containing a `fix_anomalies` method.
         table_name (str): Name of the table for logging purposes.
@@ -166,7 +167,7 @@ def process_side_table(df, train_ids, preprocessor, table_name, cardinality_thre
 
     Returns:
         tuple: A tuple containing:
-            - pd.DataFrame: The processed and recombined (train + test) DataFrame.
+            - pd.DataFrame: The processed and recombined (fit + transform-only) DataFrame.
             - list: Names of the newly generated categorical columns.
     """
     logger.info(f"Preprocessing {table_name}...")
@@ -178,9 +179,9 @@ def process_side_table(df, train_ids, preprocessor, table_name, cardinality_thre
     if 'SK_ID_CURR' not in df.columns:
         raise KeyError(f"'SK_ID_CURR' missing in {table_name}")
 
-    # Split into train and test sets for training encoders
-    train_part = df[df['SK_ID_CURR'].isin(train_ids)]
-    test_part = df[~df['SK_ID_CURR'].isin(train_ids)]
+    # Encoders fit on `fit_ids` rows only; holdout and test rows are only transformed
+    train_part = df[df['SK_ID_CURR'].isin(fit_ids)]
+    test_part = df[~df['SK_ID_CURR'].isin(fit_ids)]
 
     # Reduce cardinality
     train_part, test_part, _ = reduce_cardinality(train_part, test_part, cardinality_threshold)
