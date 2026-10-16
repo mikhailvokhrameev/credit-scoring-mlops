@@ -25,7 +25,10 @@ def test_run_training_logreg_smoke(synthetic_data_dir, tmp_path):
 
     assert m["holdout_roc_auc"] >= p["gate"]["fixture_auc_min"]
     assert {"final_oof_roc_auc", "holdout_business_loss"} <= m.keys()
-    # assert "holdout_brier" in m  # enabled in Task 8
+    assert "holdout_brier" in m
+    assert 0.0 <= m["holdout_fairness_min_di"] <= 1.0
+    assert {"holdout_fairness_gender_di_ratio", "holdout_fairness_gender_eo_gap",
+            "holdout_fairness_age_di_ratio", "holdout_fairness_age_eo_gap"} <= m.keys()
     saved = json.loads((tmp_path / "art/logreg_model/metrics.json").read_text())
     assert saved["holdout_roc_auc"] == m["holdout_roc_auc"]
     assert (tmp_path / "art/logreg_model/model.joblib").exists()
@@ -33,6 +36,11 @@ def test_run_training_logreg_smoke(synthetic_data_dir, tmp_path):
     client = MlflowClient(p["mlflow"]["tracking_uri"])
     v = client.get_model_version_by_alias("credit_scoring_logreg", "challenger")
     assert v is not None
+    run = client.get_run(v.run_id)
+    assert run.data.tags["guardrails"] == "brier,fairness"
+    artifacts = {a.path for a in client.list_artifacts(v.run_id, "guardrails")}
+    assert {"guardrails/fairness_gender.csv", "guardrails/fairness_age.csv",
+            "guardrails/reliability.csv", "guardrails/reliability.png"} <= artifacts
 
 
 def test_run_training_base_flag(synthetic_data_dir, tmp_path):

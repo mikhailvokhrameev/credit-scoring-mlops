@@ -23,3 +23,7 @@ def test_f1_threshold_is_real_threshold():
 def test_evaluate_threshold_counts():
     r = evaluate_threshold(np.array([1, 0, 1, 0]), np.array([0.9, 0.6, 0.2, 0.1]), 0.5, 10.0, 1.0)
     assert (r["fn"], r["fp"], r["business_loss"], r["approval_rate"]) == (1, 1, 11.0, 0.5)
+
+
+def test_brier_known():
+    assert compute_all_metrics(np.array([0, 1]), np.array([0., 1.]))["brier"] == 0.0

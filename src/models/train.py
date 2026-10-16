@@ -12,7 +12,8 @@ from mlflow.tracking import MlflowClient
 
 from src.config import ROOT, load_params
 from src.evaluation.explainer import ModelExplainer
-from src.evaluation.metrics import compute_all_metrics, evaluate_threshold
+from src.evaluation.fairness import age_groups, fairness_report, fairness_summary
+from src.evaluation.metrics import compute_all_metrics, evaluate_threshold, plot_reliability, reliability_table
 from src.models.catboost_model import CatBoostModel
 from src.models.lgbm_model import LGBMModel
 from src.models.logreg_model import LogRegModel
@@ -96,6 +97,40 @@ def _log_shap(model, X: pd.DataFrame, xai_dir: Path, seed: int) -> None:
         },
         "xai_config.json",
     )
+
+
+def _log_guardrails(
+    holdout_df: pd.DataFrame, y_holdout: np.ndarray, p_holdout: np.ndarray,
+    threshold: float, guardrail_dir: Path,
+) -> dict[str, float]:
+    """Log calibration and fairness guardrails of the holdout predictions.
+
+    Guardrails are monitored, never optimized: the tables and the reliability plot go to the
+    `guardrails/` artifacts, the summary metrics are returned (and logged to the active run).
+    """
+    guardrail_dir.mkdir(parents=True, exist_ok=True)
+    reliability = reliability_table(y_holdout, p_holdout)
+    reliability.to_csv(guardrail_dir / "reliability.csv", index=False)
+    plot_reliability(reliability, guardrail_dir / "reliability.png")
+
+    attributes = {
+        "gender": holdout_df["CODE_GENDER"].astype(str),
+        "age": age_groups(holdout_df["DAYS_BIRTH"]),
+    }
+    fairness: dict[str, float] = {}
+    for attr, groups in attributes.items():
+        report = fairness_report(y_holdout, p_holdout, groups, threshold)
+        report.to_csv(guardrail_dir / f"fairness_{attr}.csv")
+        summary = fairness_summary(report)
+        fairness[f"holdout_fairness_{attr}_di_ratio"] = summary["di_ratio"]
+        fairness[f"holdout_fairness_{attr}_eo_gap"] = summary["eo_gap"]
+    ratios = [v for k, v in fairness.items() if k.endswith("_di_ratio") and not np.isnan(v)]
+    fairness["holdout_fairness_min_di"] = min(ratios) if ratios else float("nan")
+
+    mlflow.log_metrics(fairness)
+    mlflow.log_artifacts(str(guardrail_dir), artifact_path="guardrails")
+    mlflow.set_tag("guardrails", "brier,fairness")
+    return fairness
 
 
 def _register_challenger(model_info, registered_name: str) -> str:
@@ -247,6 +282,10 @@ def _run_training(
             holdout_business = {f"holdout_{k}": float(v) for k, v in business.items()}
             mlflow.log_metrics(holdout_business)
             metrics |= holdout_business
+            metrics |= _log_guardrails(
+                holdout_df, y_holdout.values, p_holdout,
+                thresholds["best_business_threshold"], model_dir / "guardrails",
+            )
             metrics = {k: float(v) for k, v in metrics.items()}
             logger.info(
                 f"Holdout ROC-AUC={metrics['holdout_roc_auc']:.4f} | "

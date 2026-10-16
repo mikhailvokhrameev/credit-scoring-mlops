@@ -1,7 +1,10 @@
 import logging
+from pathlib import Path
 from typing import Dict, Tuple
 import numpy as np
-from sklearn.metrics import roc_auc_score, average_precision_score
+import pandas as pd
+from matplotlib.figure import Figure
+from sklearn.metrics import roc_auc_score, average_precision_score, brier_score_loss
 import mlflow
 
 logger = logging.getLogger(__name__)
@@ -37,6 +40,7 @@ def compute_all_metrics(y_true: np.ndarray, y_prob: np.ndarray, prefix: str = ""
     - Gini
     - KS statistic
     - Average Precision (PR-AUC)
+    - Brier score (calibration; monitored, not optimized)
 
     Automatically logs to MLflow if active run exists.
     """
@@ -73,7 +77,14 @@ def compute_all_metrics(y_true: np.ndarray, y_prob: np.ndarray, prefix: str = ""
     except Exception as e:
         logger.warning(f"Average precision failed: {e}")
         metrics["average_precision"] = 0.0
-        
+
+    # Brier score
+    try:
+        metrics["brier"] = float(brier_score_loss(y_true, y_prob))
+    except Exception as e:
+        logger.warning(f"Brier score failed: {e}")
+        metrics["brier"] = float("nan")
+
     # Apply prefix to returned metrics
     metrics_with_prefix = {
         f"{prefix}{k}": v for k, v in metrics.items()
@@ -93,6 +104,35 @@ def compute_all_metrics(y_true: np.ndarray, y_prob: np.ndarray, prefix: str = ""
         logger.warning("No active MLflow run found")
 
     return metrics_with_prefix
+
+
+def reliability_table(y_true: np.ndarray, y_proba: np.ndarray, n_bins: int = 10) -> pd.DataFrame:
+    """Calibration table over quantile bins of the predicted probability.
+
+    Columns: bin, mean_pred, frac_pos, count. Duplicate bin edges are merged, so fewer than
+    n_bins rows may come back for heavily tied predictions.
+    """
+    frame = pd.DataFrame({"y": np.asarray(y_true), "p": np.asarray(y_proba, dtype=float)})
+    frame["bin"] = pd.qcut(frame["p"], n_bins, labels=False, duplicates="drop")
+    table = frame.groupby("bin").agg(mean_pred=("p", "mean"), frac_pos=("y", "mean"), count=("y", "size"))
+    return table.reset_index()
+
+
+def plot_reliability(table: pd.DataFrame, path: Path) -> Path:
+    """Save the reliability diagram (predicted vs observed default rate) as a PNG."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig = Figure(figsize=(5, 5))  # no pyplot: independent of the global backend
+    ax = fig.subplots()
+    ax.plot([0, 1], [0, 1], linestyle="--", color="gray", label="perfect calibration")
+    ax.plot(table["mean_pred"], table["frac_pos"], marker="o", label="model")
+    ax.set_xlabel("Mean predicted probability")
+    ax.set_ylabel("Observed default rate")
+    ax.set_title("Reliability diagram")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(path, dpi=100)
+    return path
 
 
 def evaluate_threshold(
