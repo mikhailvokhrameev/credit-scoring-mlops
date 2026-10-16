@@ -1,7 +1,9 @@
 """Shared pytest fixtures: synthetic credit-scoring data, no Kaggle files needed."""
 import json
+import os
 from pathlib import Path
 
+import mlflow
 import numpy as np
 import pandas as pd
 import pytest
@@ -106,7 +108,22 @@ def synthetic_data_dir(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def _reset_mlflow_globals() -> None:
+    mlflow.set_tracking_uri(None)
+    mlflow.tracking.fluent._active_experiment_id = None  # no public reset for set_experiment
+    os.environ.pop("MLFLOW_EXPERIMENT_ID", None)
+
+
 @pytest.fixture(autouse=True)
 def _isolated_mlflow(tmp_path, monkeypatch):
-    """Keep MLflow out of the repo: never write ./mlruns during tests."""
+    """Keep MLflow out of the repo and out of other tests.
+
+    The env var selects a per-test sqlite store; chdir sends the default artifact root
+    (./mlruns for sqlite stores) into tmp_path; the process-wide tracking URI and active
+    experiment that `set_tracking_uri` / `set_experiment` cache are reset around the test.
+    """
+    _reset_mlflow_globals()
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
+    monkeypatch.chdir(tmp_path)
+    yield
+    _reset_mlflow_globals()

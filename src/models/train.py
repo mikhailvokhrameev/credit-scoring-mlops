@@ -139,6 +139,27 @@ def run_training(
         FileNotFoundError: if the holdout (or other pipeline outputs) are missing.
         ValueError: if train and holdout share clients or the holdout does not match its ids.
     """
+    previous_uri = mlflow.get_tracking_uri()  # set_tracking_uri is process-wide state
+    try:
+        return _run_training(
+            model_name, params, data_dir=data_dir, artifact_dir=artifact_dir,
+            trials=trials, device=device, base=base, register=register,
+        )
+    finally:
+        mlflow.set_tracking_uri(previous_uri)
+
+
+def _run_training(
+    model_name: str,
+    params: dict,
+    *,
+    data_dir: Path,
+    artifact_dir: Path,
+    trials: int,
+    device: str = "cpu",
+    base: bool = False,
+    register: bool = True,
+) -> dict[str, float]:
     ModelClass = MODEL_REGISTRY[model_name]
     seed = params["seed"]
     fn_cost, fp_cost = params["business"]["fn_cost"], params["business"]["fp_cost"]

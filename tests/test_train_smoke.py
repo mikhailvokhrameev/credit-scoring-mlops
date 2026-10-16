@@ -12,12 +12,6 @@ from src.models.train import run_training
 pytestmark = pytest.mark.smoke
 
 
-@pytest.fixture(autouse=True)
-def _artifacts_in_tmp(tmp_path, monkeypatch):
-    """A sqlite tracking store defaults its artifact root to ./mlruns; keep it out of the repo."""
-    monkeypatch.chdir(tmp_path)
-
-
 def smoke_params(tmp_path) -> dict:
     p = load_params()
     p["mlflow"]["tracking_uri"] = f"sqlite:///{tmp_path}/mlflow.db"
