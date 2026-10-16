@@ -52,7 +52,7 @@ def one_hot_encoder(train: pd.DataFrame, test: pd.DataFrame) -> tuple:
     return train, test, new_columns
 
 
-def reduce_cardinality(train: pd.DataFrame, test: pd.DataFrame, cardinality_threshold: int = 10) -> tuple:
+def reduce_cardinality(train: pd.DataFrame, test: pd.DataFrame, cardinality_threshold: int) -> tuple:
     """
     Reduces the cardinality of categorical features to prevent overfitting.
     
@@ -63,7 +63,7 @@ def reduce_cardinality(train: pd.DataFrame, test: pd.DataFrame, cardinality_thre
     Args:
         train (pd.DataFrame): Training dataset.
         test (pd.DataFrame): Testing dataset.
-        cardinality_threshold (int): Number of top categories to keep. Default is 10.
+        cardinality_threshold (int): Number of top categories to keep (params.yaml: features.cardinality_threshold).
         
     Returns:
         tuple: (train_transformed, test_transformed, modified_cols)
@@ -91,7 +91,7 @@ def reduce_cardinality(train: pd.DataFrame, test: pd.DataFrame, cardinality_thre
     return train, test, modified_cols
 
 
-def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: pd.Series, n_splits: int = 5) -> tuple:
+def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: pd.Series, n_splits: int, seed: int) -> tuple:
     """
     Applies K-Fold Target Encoding to a categorical feature.
     
@@ -105,7 +105,8 @@ def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: 
         test (pd.DataFrame): Testing dataset.
         col (str): The name of the categorical column to encode.
         target (pd.Series): The target variable series aligned with the train index.
-        n_splits (int): Number of folds for cross-validation. Default is 5.
+        n_splits (int): Number of folds for cross-validation (params.yaml: cv.n_splits).
+        seed (int): Random seed for fold shuffling (params.yaml: seed).
         
     Returns:
         tuple: (train_encoded_series, test_encoded_series)
@@ -113,7 +114,7 @@ def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: 
     train = train.copy()
     test = test.copy()
     
-    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
     
     global_mean = target.mean()
     train_encoded = pd.Series(index=train.index, dtype=float)
@@ -135,7 +136,7 @@ def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: 
     return train_encoded, test_encoded
 
 
-def process_side_table(df, train_ids, preprocessor, table_name):
+def process_side_table(df, train_ids, preprocessor, table_name, cardinality_threshold):
     """
     Cleans and encodes child tables while strictly preventing data leakage.
 
@@ -160,6 +161,8 @@ def process_side_table(df, train_ids, preprocessor, table_name):
         preprocessor (object): A preprocessor instance (e.g., PreviousPreprocessor) 
             containing a `fix_anomalies` method.
         table_name (str): Name of the table for logging purposes.
+        cardinality_threshold (int): Number of top categories to keep per categorical
+            column (params.yaml: features.cardinality_threshold).
 
     Returns:
         tuple: A tuple containing:
@@ -180,7 +183,7 @@ def process_side_table(df, train_ids, preprocessor, table_name):
     test_part = df[~df['SK_ID_CURR'].isin(train_ids)]
 
     # Reduce cardinality
-    train_part, test_part, _ = reduce_cardinality(train_part, test_part)
+    train_part, test_part, _ = reduce_cardinality(train_part, test_part, cardinality_threshold)
     # One-Hot Encoding
     train_part, test_part, cat_cols = one_hot_encoder(train_part, test_part)
 

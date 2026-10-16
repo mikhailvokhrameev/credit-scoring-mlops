@@ -25,13 +25,11 @@ from src.features.previous import build_previous_features
 from src.features.installments import build_installments_features
 from src.features.pos_cash import build_pos_cash_features
 from src.features.credit_card import build_credit_card_features
-from pathlib import Path
+from src.config import ROOT, load_params
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
-
-ROOT = Path.cwd()
 
 
 class FeatureEngineeringPipeline:
@@ -61,6 +59,7 @@ class FeatureEngineeringPipeline:
             use_cache (bool): Whether to use cached parquet files for faster loading.
                             If False, will reload from CSV. Default: True.
         """
+        self.params = load_params()
         self.loader = DataLoader(raw_dir=str(ROOT / 'data' / 'raw'), cache_dir=str(ROOT / 'data' / 'cache'))
         self.use_cache = use_cache
         self.output_dir = ROOT / "data" / "processed"
@@ -110,15 +109,17 @@ class FeatureEngineeringPipeline:
             "Feature_Engineering".
         """
 
-        mlflow.set_experiment("Home_Credit_Default_Risk")
+        mlflow.set_tracking_uri(self.params["mlflow"]["tracking_uri"])
+        mlflow.set_experiment(self.params["mlflow"]["experiment"])
         
         with mlflow.start_run(run_name="Feature_Engineering"):
             # Log input params
             mlflow.log_params({
-                "top_n_selection": 300,
+                "top_n_selection": self.params["features"]["top_n"],
                 "cache_enabled": self.use_cache,
             })
             
+            cardinality_threshold = self.params["features"]["cardinality_threshold"]
             data = self.loader.load_all(use_cache=self.use_cache)
             
             # Application
@@ -143,13 +144,13 @@ class FeatureEngineeringPipeline:
             # Bureau and Bureau Balance
             bureau_curr_map = data['bureau'][['SK_ID_BUREAU', 'SK_ID_CURR']].drop_duplicates()
             
-            bureau, bureau_cat = process_side_table(data['bureau'], train_ids, self.generic_preprocessor, "Bureau")
+            bureau, bureau_cat = process_side_table(data['bureau'], train_ids, self.generic_preprocessor, "Bureau", cardinality_threshold)
             del data['bureau']
             
             bureau_balance = data['bureau_balance'].merge(bureau_curr_map, on='SK_ID_BUREAU', how='inner')
             del data['bureau_balance'], bureau_curr_map
             
-            bb, bb_cat = process_side_table(bureau_balance, train_ids, self.generic_preprocessor, "Bureau Balance")
+            bb, bb_cat = process_side_table(bureau_balance, train_ids, self.generic_preprocessor, "Bureau Balance", cardinality_threshold)
             del bureau_balance
             gc.collect()
 
@@ -158,7 +159,7 @@ class FeatureEngineeringPipeline:
             gc.collect()
 
             # Previous applications
-            prev, prev_cat = process_side_table(data['previous_application'], train_ids, self.prev_preprocessor, "Previous")
+            prev, prev_cat = process_side_table(data['previous_application'], train_ids, self.prev_preprocessor, "Previous", cardinality_threshold)
             del data['previous_application']
             
             previous_features = build_previous_features(prev, prev_cat)
@@ -174,7 +175,7 @@ class FeatureEngineeringPipeline:
             gc.collect()
 
             # Pos cash
-            pos, pos_cat = process_side_table(data['POS_CASH_balance'], train_ids, self.pos_preprocessor, "POS CASH")
+            pos, pos_cat = process_side_table(data['POS_CASH_balance'], train_ids, self.pos_preprocessor, "POS CASH", cardinality_threshold)
             del data['POS_CASH_balance']
             
             pos_features = build_pos_cash_features(pos, pos_cat)
@@ -182,7 +183,7 @@ class FeatureEngineeringPipeline:
             gc.collect()
 
             # Credit card
-            cc, cc_cat = process_side_table(data['credit_card_balance'], train_ids, self.cc_preprocessor, "Credit Card")
+            cc, cc_cat = process_side_table(data['credit_card_balance'], train_ids, self.cc_preprocessor, "Credit Card", cardinality_threshold)
             del data['credit_card_balance']
             
             cc_features = build_credit_card_features(cc, cc_cat)
@@ -209,7 +210,7 @@ class FeatureEngineeringPipeline:
             
             # Feature selection
             logger.info("Performing feature selection...")
-            df = self._select_features_ridge(df)
+            df = self._select_features_ridge(df, top_n=self.params["features"]["top_n"])
             self._save_results(df)
             
             # Log metrics and artifacts
@@ -224,7 +225,7 @@ class FeatureEngineeringPipeline:
             return df
         
 
-    def _select_features_ridge(self, df: pd.DataFrame, top_n: int = 300) -> pd.DataFrame:
+    def _select_features_ridge(self, df: pd.DataFrame, top_n: int) -> pd.DataFrame:
         """
         Perform feature selection using Ridge regression coefficient magnitude.
         
@@ -234,7 +235,7 @@ class FeatureEngineeringPipeline:
         
         Args:
             df (pd.DataFrame): Feature matrix with 'TARGET' and 'SK_ID_CURR' columns.
-            top_n (int): Maximum number of features to select. Default: 300.
+            top_n (int): Maximum number of features to select (params.yaml: features.top_n).
             
         Returns:
             pd.DataFrame: DataFrame with selected features plus 'SK_ID_CURR' and 'TARGET'.

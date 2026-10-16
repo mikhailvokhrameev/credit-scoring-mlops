@@ -4,8 +4,11 @@ import numpy as np
 import os
 from scipy.stats import wilcoxon
 
-EXPERIMENT_NAME = "Home_Credit_Default_Risk"
-MLFLOW_DB_URI = "sqlite:///mlflow.db"
+from src.config import load_params
+
+_MLFLOW = load_params()["mlflow"]
+EXPERIMENT_NAME = _MLFLOW["experiment"]
+MLFLOW_DB_URI = _MLFLOW["tracking_uri"]
 REPORT_DIR = "src/evaluation/report/"
 REPORT_PATH = os.path.join(REPORT_DIR, "model_comparison_report.md")
 

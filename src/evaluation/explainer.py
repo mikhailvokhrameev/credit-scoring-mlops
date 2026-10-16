@@ -21,7 +21,7 @@ warnings.filterwarnings("ignore")
 
 
 class ModelExplainer:
-    def __init__(self, model, X_train: pd.DataFrame, feature_names: list = None, max_background_samples: int = 1000, output_dir: Path = None):
+    def __init__(self, model, X_train: pd.DataFrame, feature_names: list = None, max_background_samples: int = 1000, output_dir: Path = None, *, seed: int):
         self.model = model
         self.output_dir = output_dir
         self.is_linear_pipeline = False
@@ -39,7 +39,7 @@ class ModelExplainer:
             X_train_transformed = X_train
 
         if len(X_train_transformed) > max_background_samples:
-            self.X_train = X_train_transformed.sample(max_background_samples, random_state=42)
+            self.X_train = X_train_transformed.sample(max_background_samples, random_state=seed)
         else:
             self.X_train = X_train_transformed.copy()
 

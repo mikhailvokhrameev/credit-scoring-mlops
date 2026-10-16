@@ -1,17 +1,14 @@
 import pandas as pd
 import logging
 import gc
-from pathlib import Path
 
+from src.config import ROOT
 from src.data.loader import DataLoader
 from src.data.preprocessor import ApplicationPreprocessor
 from src.features.application import build_application_features
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
-
-ROOT = Path.cwd()
-
 
 class FeatureEngineeringPipeline:
     """

@@ -16,6 +16,7 @@ from src.models.xgb_model import XGBModel
 from src.models.catboost_model import CatBoostModel
 
 from src.evaluation.metrics import compute_all_metrics
+from src.config import load_params
 from src.evaluation.explainer import ModelExplainer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -120,7 +121,7 @@ def main():
             logger.info("Starting SHAP explainability block...")
 
             X_sample = X.sample(min(1000, len(X)), random_state=42)
-            explainer = ModelExplainer(model=final_model, X_train=X, feature_names=X.columns.tolist(), output_dir=XAI_DIR)
+            explainer = ModelExplainer(model=final_model, X_train=X, feature_names=X.columns.tolist(), output_dir=XAI_DIR, seed=load_params()["seed"])
 
             # Global explanations
             logger.info("Computing global SHAP explanations...")
