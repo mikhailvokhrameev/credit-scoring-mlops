@@ -68,7 +68,15 @@ def test_best_iteration_set_with_eval_set(cls, synth):
         assert m.best_iteration_ is None
     else:
         assert isinstance(m.best_iteration_, int)
-        assert 0 < m.best_iteration_ <= N_ESTIMATORS
+        it = m.best_iteration_
+        assert 0 <= it < N_ESTIMATORS
+        # best_iteration_ is the 0-based index for every booster
+        if cls is LGBMModel:
+            assert it + 1 == m.model.booster_.num_trees()
+        elif cls is CatBoostModel:
+            assert it + 1 == m.model.tree_count_
+        else:
+            assert it == m.model.best_iteration
 
 
 def test_best_iteration_none_without_eval_set(cls, synth):

@@ -36,7 +36,7 @@ class LGBMModel(BaseModel):
 
         self.model = lgb.LGBMClassifier(**dict(self.params))
         self.model.fit(X, y, eval_metric="auc", callbacks=callbacks, **fit_kwargs)
-        self.best_iteration_ = int(self.model.best_iteration_) if use_early_stopping else None
+        self.best_iteration_ = int(self.model.best_iteration_) - 1 if use_early_stopping else None
 
         return self
 

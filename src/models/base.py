@@ -32,6 +32,8 @@ class BaseModel(abc.ABC):
         self.params = params or {}
         self.model = None
         self.features_: List[str] = []
+        # 0-based index of the best boosting iteration, identical for every booster
+        # (tree count = best_iteration_ + 1). None without active early stopping / for non-boosters.
         self.best_iteration_: Optional[int] = None
 
     @abc.abstractmethod
