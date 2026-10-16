@@ -19,6 +19,7 @@ from src.models.lgbm_model import LGBMModel
 from src.models.logreg_model import LogRegModel
 from src.models.tuner import OptunaHPOTuner, make_study_name
 from src.models.xgb_model import XGBModel
+from src.monitoring.drift import drift_report, psi
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -137,6 +138,58 @@ def _log_guardrails(
     return fairness
 
 
+def _load_drift_inputs(
+    data_dir: Path, base: bool, feature_cols: list[str], top_k: int
+) -> tuple[pd.DataFrame, list[str]]:
+    """Kaggle test features (PSI reference only, never scored) and the top-k features to monitor.
+
+    The top-k come from `feature_importance.csv`; the base pipeline has none, so the order of
+    `selected_features.json` is used instead.
+    """
+    processed = Path(data_dir) / ("processed_base" if base else "processed")
+    test_path = processed / "test_features.parquet"
+    if not test_path.exists():
+        raise FileNotFoundError(f"Missing {test_path.name} in {processed}: {FEATURES_HINT}")
+    test = pd.read_parquet(test_path)
+    absent = [c for c in feature_cols if c not in test.columns]
+    if absent:
+        raise ValueError(f"test frame lacks selected features: {absent}")
+
+    importance_path = processed / "feature_importance.csv"
+    if importance_path.exists():
+        ranked = pd.read_csv(importance_path)["feature"].tolist()
+    else:
+        logger.info(
+            f"{importance_path.name} not found in {processed}; monitoring the first features of selected_features.json"
+        )
+        ranked = feature_cols
+    selected = set(feature_cols)
+    top_features = [f for f in ranked if f in selected][:top_k]
+    return test[feature_cols].astype(np.float64), top_features
+
+
+def _log_drift(
+    X_train: pd.DataFrame, X_test: pd.DataFrame, top_features: list[str],
+    train_scores: np.ndarray, test_scores: np.ndarray, psi_alert: float, drift_dir: Path,
+) -> dict[str, float]:
+    """PSI of the model score and of the top features, train against the Kaggle test surrogate.
+
+    Monitoring only: an alert sets the `drift_alert` tag and a warning, it never fails training.
+    """
+    drift_dir.mkdir(parents=True, exist_ok=True)
+    report = drift_report(X_train, X_test, top_features)
+    report.to_csv(drift_dir / "drift_report.csv", index=False)
+    drift = {"psi_score": psi(train_scores, test_scores), "psi_max_feature": float(report["psi"].max())}
+
+    alert = drift["psi_score"] > psi_alert
+    if alert:
+        logger.warning(f"Score drift: PSI={drift['psi_score']:.3f} exceeds the alert level {psi_alert}")
+    mlflow.log_metrics(drift)
+    mlflow.log_artifacts(str(drift_dir), artifact_path="monitoring")
+    mlflow.set_tag("drift_alert", str(alert).lower())
+    return drift
+
+
 def _register_challenger(model_info, registered_name: str) -> str:
     """Point the `challenger` alias of the registered model at the version just logged."""
     version = model_info.registered_model_version
@@ -172,11 +225,13 @@ def run_training(
         register: log the model to the MLflow Registry and set the `challenger` alias.
 
     Returns:
-        Flat metrics: OOF metrics with the `final_oof_` prefix, holdout metrics with `holdout_`.
+        Flat metrics: OOF metrics with the `final_oof_` prefix, holdout metrics with `holdout_`,
+        drift metrics `psi_score` and `psi_max_feature` (train vs the Kaggle test surrogate).
 
     Raises:
-        FileNotFoundError: if the holdout (or other pipeline outputs) are missing.
-        ValueError: if train and holdout share clients or the holdout does not match its ids.
+        FileNotFoundError: if the holdout, the test features (or other pipeline outputs) are missing.
+        ValueError: if train and holdout share clients, the holdout does not match its ids, or
+            the test features lack a selected feature.
     """
     previous_uri = mlflow.get_tracking_uri()  # set_tracking_uri is process-wide state
     try:
@@ -210,6 +265,7 @@ def _run_training(
     y = train_df["TARGET"]
     X_holdout = holdout_df[feature_cols].astype(np.float64)  # protected columns stay in holdout_df
     y_holdout = holdout_df["TARGET"]
+    X_test, top_features = _load_drift_inputs(data_dir, base, feature_cols, params["monitoring"]["psi_top_k"])
     logger.info(f"Train shape: {X.shape}, target rate: {y.mean():.4f}; holdout rows: {len(X_holdout)}")
 
     model_dir = Path(artifact_dir) / f"{model_name}{suffix}_model"
@@ -290,6 +346,11 @@ def _run_training(
                 holdout_df, y_holdout.values, p_holdout,
                 thresholds["best_business_threshold"], params["fairness"]["min_group_size"],
                 model_dir / "guardrails",
+            )
+            # Out-of-fold scores are the train reference: the refit model has seen its own train rows
+            metrics |= _log_drift(
+                X, X_test, top_features, cv.oof, final_model.predict_proba(X_test),
+                params["monitoring"]["psi_alert"], model_dir / "monitoring",
             )
             metrics = {k: float(v) for k, v in metrics.items()}
             logger.info(

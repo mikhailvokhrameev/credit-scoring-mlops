@@ -26,6 +26,7 @@ def test_run_training_logreg_smoke(synthetic_data_dir, tmp_path):
     assert m["holdout_roc_auc"] >= p["gate"]["fixture_auc_min"]
     assert {"final_oof_roc_auc", "holdout_business_loss"} <= m.keys()
     assert "holdout_brier" in m
+    assert "psi_score" in m
     assert 0.0 <= m["holdout_fairness_min_di"] <= 1.0
     assert {"holdout_fairness_gender_di_ratio", "holdout_fairness_gender_eo_gap",
             "holdout_fairness_age_di_ratio", "holdout_fairness_age_eo_gap"} <= m.keys()
