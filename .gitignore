@@ -244,3 +244,6 @@ mlruns/
 !/artifacts/*_model/metrics.json
 /artifacts/*_base_model/
 /.vscode
+# superpowers (agent plans and scratch)
+/.superpowers/
+/docs/superpowers/
