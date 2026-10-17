@@ -1,6 +1,7 @@
 import matplotlib
 import mlflow
 import numpy as np
+import pandas as pd
 import pytest
 import shap
 import xgboost as xgb
@@ -9,7 +10,7 @@ from mlflow.tracking import MlflowClient
 matplotlib.use("Agg")
 
 from src.config import load_params
-from src.evaluation.explainer import ModelExplainer
+from src.evaluation.explainer import ModelExplainer, compare_local_contributions
 from src.models.catboost_model import CatBoostModel
 from src.models.lgbm_model import LGBMModel
 from src.models.logreg_model import LogRegModel
@@ -105,3 +106,64 @@ def test_xgb_permutation_fallback_is_seeded_last_resort(synth, tmp_path, monkeyp
         explainer = ModelExplainer(model, X, seed=seed, output_dir=tmp_path)
     assert "Native XGBoost TreeSHAP failed" in caplog.text
     assert explainer.explain_local_shap(X.iloc[0], save_path=tmp_path / "local.png").exists()
+
+
+@pytest.mark.parametrize("cls", [LogRegModel, LGBMModel, XGBModel, CatBoostModel], ids=lambda c: c.__name__)
+def test_local_explanation_is_additive_in_log_odds(cls, synth, tmp_path):
+    seed = load_params()["seed"]
+    X, y = features(synth), synth["TARGET"]
+    model = cls(_params(cls, seed)).fit(X, y)
+    explainer = ModelExplainer(model, X, seed=seed, output_dir=tmp_path)
+    row = X.iloc[0]
+    exp = explainer.local_explanation(row)
+    p = model.predict_proba(pd.DataFrame([row]))[0]
+    assert exp.values.shape == (X.shape[1],)
+    assert explainer.output_space == "log_odds"
+    assert exp.values.sum() + float(exp.base_values) == pytest.approx(np.log(p / (1 - p)), abs=1e-3)
+
+
+def test_compare_local_contributions_aligns_by_feature_name(synth, tmp_path):
+    seed = load_params()["seed"]
+    X, y = features(synth), synth["TARGET"]
+    assert "NOISE_0" in X.columns
+    models = {
+        "lgbm": LGBMModel(_params(LGBMModel, seed)).fit(X, y),
+        "logreg": LogRegModel(_params(LogRegModel, seed)).fit(X.drop(columns="NOISE_0"), y),
+    }
+    top_n = X.shape[1]  # all features, so NOISE_0 is guaranteed to be in the result
+
+    result = compare_local_contributions(models, X, X.iloc[0], seed=seed, top_n=top_n)
+
+    assert list(result.columns) == ["lgbm", "logreg"]
+    assert len(result) == top_n
+    assert set(result.index) == set(X.columns)
+    assert np.isnan(result.loc["NOISE_0", "logreg"])
+    assert not np.isnan(result.loc["NOISE_0", "lgbm"])
+    assert result.drop(index="NOISE_0").notna().all().all()
+    strength = result.abs().max(axis=1).to_numpy()
+    assert (np.diff(strength) <= 0).all()
+
+
+def test_compare_local_contributions_truncates_to_top_n(synth):
+    seed = load_params()["seed"]
+    X, y = features(synth), synth["TARGET"]
+    models = {"lgbm": LGBMModel(_params(LGBMModel, seed)).fit(X, y)}
+    result = compare_local_contributions(models, X, X.iloc[0], seed=seed, top_n=5)
+    assert len(result) == 5
+
+
+def test_compare_local_contributions_rejects_probability_space(synth, monkeypatch):
+    seed = load_params()["seed"]
+    X, y = features(synth), synth["TARGET"]
+    model = XGBModel(_params(XGBModel, seed)).fit(X, y)
+
+    def probability_explainer(self, booster_model):
+        self.output_space = "probability"
+        background = self.X_train.head(20)
+        return shap.Explainer(
+            lambda d: booster_model.predict_proba(d)[:, 1], shap.maskers.Independent(background), seed=self.seed
+        )
+
+    monkeypatch.setattr(ModelExplainer, "_create_xgb_explainer", probability_explainer)
+    with pytest.raises(ValueError, match="xgb"):
+        compare_local_contributions({"xgb": model}, X, X.iloc[0], seed=seed, top_n=5)

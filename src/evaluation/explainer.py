@@ -1,4 +1,5 @@
 import logging
+import tempfile
 import warnings
 from pathlib import Path
 
@@ -55,12 +56,15 @@ class ModelExplainer:
             self.output_dir = Path("artifacts/xai")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.feature_names = (feature_names or X_train.columns.tolist())
-
         if hasattr(self.model, "transform"):
             X_train_transformed = self.model.transform(X_train)
         else:
             X_train_transformed = X_train
+
+        # Names of the columns the model actually sees (it may drop or rename some of X_train's).
+        self.feature_names = feature_names or X_train_transformed.columns.tolist()
+        # Unit of the explainer's values: "log_odds" or "probability" (permutation fallbacks).
+        self.output_space = "log_odds"
 
         if len(X_train_transformed) > max_background_samples:
             self.X_train = X_train_transformed.sample(max_background_samples, random_state=seed)
@@ -80,56 +84,8 @@ class ModelExplainer:
     def compute_global_shap(self, X_sample: pd.DataFrame):
         logger.info("Computing SHAP values...")
         
-        if hasattr(self.model, "transform"):
-            X_sample_transformed = self.model.transform(X_sample)
-        else:
-            X_sample_transformed = X_sample
+        self.shap_values = self._explain(X_sample)
 
-        if getattr(self, "is_linear_pipeline", False):
-            X_for_shap = pd.DataFrame(
-                self.preprocessor.transform(X_sample_transformed), 
-                columns=X_sample_transformed.columns
-            )
-        else:
-            X_for_shap = X_sample_transformed
-
-        max_evals = X_sample_transformed.shape[1] * 2 + 100
-
-        try:
-            vals = self.explainer(X_for_shap, check_additivity=False)
-        except TypeError:
-            try:
-                vals = self.explainer(X_for_shap, max_evals=max_evals)
-            except Exception:
-                vals = self.explainer(X_for_shap)
-        except Exception:
-            try:
-                vals = self.explainer(X_for_shap, max_evals=max_evals)
-            except Exception:
-                vals = self.explainer(X_for_shap)
-
-        if isinstance(vals, shap.Explanation):
-            if len(vals.shape) == 3:
-                self.shap_values = vals[:, :, 1] if vals.shape[2] == 2 else vals[:, :, 0]
-            else:
-                self.shap_values = vals
-        else:
-            sv = vals[1] if isinstance(vals, list) and len(vals) > 1 else (vals[0] if isinstance(vals, list) else vals)
-            if len(sv.shape) == 3:
-                sv = sv[:, :, 1] if sv.shape[2] == 2 else sv[:, :, 0]
-            
-            self.shap_values = shap.Explanation(
-                values=sv,
-                data=X_for_shap.values,
-                feature_names=self.feature_names
-            )
-
-        if getattr(self, "is_linear_pipeline", False) and isinstance(self.shap_values, shap.Explanation):
-            self.shap_values.data = X_sample_transformed.values
-            
-        if hasattr(self.shap_values, "feature_names"):
-             self.shap_values.feature_names = self.feature_names
-        
         try:
             shap_beeswarm_path = self.output_dir / "shap_summary_beeswarm.png"
             plt.figure(figsize=(10, 6))
@@ -149,6 +105,64 @@ class ModelExplainer:
 
         return self.shap_values
 
+
+    def _explain(self, X_raw: pd.DataFrame) -> shap.Explanation:
+        """2-D explanation (rows x features) of raw, not yet preprocessed rows."""
+        if hasattr(self.model, "transform"):
+            X_transformed = self.model.transform(X_raw)
+        else:
+            X_transformed = X_raw
+
+        if getattr(self, "is_linear_pipeline", False):
+            X_for_shap = pd.DataFrame(
+                self.preprocessor.transform(X_transformed),
+                columns=X_transformed.columns
+            )
+        else:
+            X_for_shap = X_transformed
+
+        max_evals = X_transformed.shape[1] * 2 + 100
+
+        try:
+            vals = self.explainer(X_for_shap, check_additivity=False)
+        except TypeError:
+            try:
+                vals = self.explainer(X_for_shap, max_evals=max_evals)
+            except Exception:
+                vals = self.explainer(X_for_shap)
+        except Exception:
+            try:
+                vals = self.explainer(X_for_shap, max_evals=max_evals)
+            except Exception:
+                vals = self.explainer(X_for_shap)
+
+        if isinstance(vals, shap.Explanation):
+            if len(vals.shape) == 3:
+                explanation = vals[:, :, 1] if vals.shape[2] == 2 else vals[:, :, 0]
+            else:
+                explanation = vals
+        else:
+            sv = vals[1] if isinstance(vals, list) and len(vals) > 1 else (vals[0] if isinstance(vals, list) else vals)
+            if len(sv.shape) == 3:
+                sv = sv[:, :, 1] if sv.shape[2] == 2 else sv[:, :, 0]
+
+            explanation = shap.Explanation(
+                values=sv,
+                data=X_for_shap.values,
+                feature_names=self.feature_names
+            )
+
+        if getattr(self, "is_linear_pipeline", False) and isinstance(explanation, shap.Explanation):
+            explanation.data = X_transformed.values
+
+        if hasattr(explanation, "feature_names"):
+            explanation.feature_names = self.feature_names
+
+        return explanation
+
+    def local_explanation(self, instance: pd.Series) -> shap.Explanation:
+        """1-D explanation of one raw row: `values` (n_features,), scalar `base_values`."""
+        return self._explain(pd.DataFrame([instance]))[0]
 
     def _create_explainer(self):
         model = self.model
@@ -176,6 +190,7 @@ class ModelExplainer:
                 return shap.LinearExplainer(clf, masker)
             else:
                 logger.info("Using default PermutationExplainer for Pipeline")
+                self.output_space = "probability"
                 masker = shap.maskers.Independent(self.X_train)
                 return shap.Explainer(model.predict_proba, masker)
 
@@ -215,6 +230,7 @@ class ModelExplainer:
         except Exception as e:
             logger.warning(f"Native XGBoost TreeSHAP failed ({e}); falling back to a model-agnostic explainer")
 
+        self.output_space = "probability"
         background = self.X_train.sample(min(200, len(self.X_train)), random_state=self.seed)
         return shap.Explainer(
             lambda d: model.predict_proba(d)[:, 1], shap.maskers.Independent(background), seed=self.seed
@@ -224,59 +240,7 @@ class ModelExplainer:
         if save_path is None:
             save_path = self.output_dir / "local_shap_waterfall.png"
     
-        instance_df = pd.DataFrame([instance])
-
-        if hasattr(self.model, "transform"):
-            instance_df_transformed = self.model.transform(instance_df)
-        else:
-            instance_df_transformed = instance_df
-
-        if getattr(self, "is_linear_pipeline", False):
-            X_for_shap = pd.DataFrame(
-                self.preprocessor.transform(instance_df_transformed), 
-                columns=instance_df_transformed.columns
-            )
-        else:
-            X_for_shap = instance_df_transformed
-
-        max_evals = instance_df_transformed.shape[1] * 2 + 100
-        
-        try:
-            local_shap = self.explainer(X_for_shap)
-        except TypeError:
-            try:
-                local_shap = self.explainer(X_for_shap, max_evals=max_evals)
-            except Exception:
-                local_shap = self.explainer(X_for_shap)
-        except Exception:
-            try:
-                local_shap = self.explainer(X_for_shap, max_evals=max_evals)
-            except Exception:
-                local_shap = self.explainer(X_for_shap)
-
-        if isinstance(local_shap, shap.Explanation):
-            if len(local_shap.shape) == 3:
-                local_shap = local_shap[:, :, 1] if local_shap.shape[2] == 2 else local_shap[:, :, 0]
-        else:
-            ls = (
-                local_shap[1]
-                if isinstance(local_shap, list) and len(local_shap) > 1
-                else (local_shap[0] if isinstance(local_shap, list) else local_shap)
-            )
-            if len(ls.shape) == 3:
-                ls = ls[:, :, 1] if ls.shape[2] == 2 else ls[:, :, 0]
-            
-            local_shap = shap.Explanation(
-                values=ls,
-                data=X_for_shap.values,
-                feature_names=self.feature_names
-            )
-
-        if getattr(self, "is_linear_pipeline", False) and isinstance(local_shap, shap.Explanation):
-            local_shap.data = instance_df_transformed.values
-
-        if hasattr(local_shap, "feature_names"):
-            local_shap.feature_names = self.feature_names
+        local_shap = self._explain(pd.DataFrame([instance]))
 
         plt.figure(figsize=(12, 6))
         shap.plots.waterfall(local_shap[0], max_display=max_display, show=False)
@@ -301,3 +265,37 @@ class ModelExplainer:
         importance_df = (importance_df.sort_values(by="importance", ascending=False).reset_index(drop=True))
 
         return importance_df
+
+
+def compare_local_contributions(
+    models: dict,
+    X_background: pd.DataFrame,
+    instance: pd.Series,
+    *,
+    seed: int,
+    top_n: int,
+) -> pd.DataFrame:
+    """SHAP contributions (log-odds) of one raw row for several models, aligned by feature name.
+
+    Rows are features (union over the models), columns are the `models` keys in order; a feature the
+    model does not use is NaN. Rows are sorted by the largest |contribution| over the models and cut
+    to `top_n`.
+
+    Raises:
+        ValueError: if a model's explainer does not work in log-odds (values would not be comparable).
+    """
+    columns = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, model in models.items():
+            explainer = ModelExplainer(model, X_background, seed=seed, output_dir=Path(tmp))
+            if explainer.output_space != "log_odds":
+                raise ValueError(
+                    f"Model '{name}': explainer works in {explainer.output_space} space, "
+                    "contributions are comparable only in log_odds."
+                )
+            exp = explainer.local_explanation(instance)
+            columns[name] = pd.Series(exp.values, index=exp.feature_names)
+
+    table = pd.DataFrame(columns)[list(models)]
+    order = table.abs().max(axis=1).sort_values(ascending=False, kind="stable").index
+    return table.loc[order].head(top_n)
