@@ -244,7 +244,7 @@ During the study, five hypotheses were formulated and statistically tested, cove
 
 **Acceptance Criterion:** p-value < 0.05 and the median proportion of missing values is higher for defaulted clients than for reliable ones.
 
-**Result: Confirmed.** Median is 39.7% for defaulted vs. 28.1% for reliable clients; Mann–Whitney test p ≈ 0. Missing values are an informative predictor and are utilized as binary `is_missing` flags.
+**Result: Confirmed.** Median is 39.7% for defaulted vs. 28.1% for reliable clients; Mann–Whitney test p ≈ 0. Missing values are an informative predictor and are exposed to the models as binary `EXT_SOURCE_1/2/3_WAS_MISSING` flags (`src/features/application.py`); other missing values stay NaN for the tree models and are median-imputed for logistic regression.
 
 ---
 

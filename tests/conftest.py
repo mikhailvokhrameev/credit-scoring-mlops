@@ -22,7 +22,7 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
 def synthetic_df(n: int = 500, seed: int = 0) -> pd.DataFrame:
     """Synthetic application table with a learnable TARGET signal.
 
-    TARGET ~ Bernoulli(sigmoid(b - 2 * z(mean EXT_SOURCE) + 0.3 * z(DAYS_BIRTH))),
+    TARGET ~ Bernoulli(sigmoid(b - 2 * z(mean EXT_SOURCE) - 0.3 * z(DAYS_BIRTH))),
     where the intercept b is solved so that the expected target rate is 0.2.
     """
     rng = np.random.default_rng(seed)
