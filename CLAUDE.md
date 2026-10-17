@@ -11,6 +11,8 @@ Training/research pipeline for credit default scoring on Home Credit (7 relation
 - `--base` training needs the base features first: `uv run python -m src.features.pipeline_base`
 - Promote to champion: `uv run python -m src.models.promote --model <name> [--base]` (exit 1 = rejected by gate)
 - Lint + tests: `make check` · tests only: `uv run pytest -q`
+- Smoke tests: `make smoke`
+- Export for serving: `uv run python export_serving_artifacts.py` (writes `artifacts/<model>[_base]_model/serving_model.joblib` + `metadata.json`; `metrics`/`thresholds` empty, thresholds are in the MLflow artifact `inference/thresholds.json`)
 - MLflow UI: `uv run mlflow ui --backend-store-uri sqlite:///mlflow.db`
 
 ## Anti-patterns
@@ -27,6 +29,7 @@ Training/research pipeline for credit default scoring on Home Credit (7 relation
 - Optuna study name embeds data+config hash; reusing a study mixes trials from other feature versions.
 - Model wrappers must not mutate `self.params`: CV fold clones share it.
 - `CODE_GENDER` is excluded from model features (`features.exclude`) but kept for the fairness audit; `DAYS_BIRTH` stays a feature. `promote.py` blocks `champion` when holdout `holdout_fairness_min_di` < `fairness.di_min`.
+- `src/evaluation/compare_models.py` is legacy: it looks for `*_non_hpo` runs that `train.py` no longer creates.
 - `365243` in `DAYS_*` columns is a missing-value sentinel, handled in `src/data/preprocessor.py`.
 - Notebooks only read DVC outputs/`artifacts/`; `make notebooks` executes 04 (needs data + the `lgbm` model and at least one other trained model); `tests/test_notebooks.py` checks `src` imports and cleared outputs.
 
