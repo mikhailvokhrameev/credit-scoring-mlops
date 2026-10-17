@@ -44,6 +44,20 @@ def test_global_shap_shape(cls, synth, tmp_path):
     assert values.values.shape == (N_EXPLAINED, X.shape[1])
 
 
+def test_global_shap_plotting_error_propagates(synth, tmp_path, monkeypatch):
+    seed = load_params()["seed"]
+    X, y = features(synth), synth["TARGET"]
+    model = LGBMModel(_params(LGBMModel, seed)).fit(X, y)
+    explainer = ModelExplainer(model, X, seed=seed, output_dir=tmp_path)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("plot failed")
+
+    monkeypatch.setattr(shap.plots, "beeswarm", boom)
+    with pytest.raises(RuntimeError, match="plot failed"):
+        explainer.compute_global_shap(X.head(N_EXPLAINED))
+
+
 def test_log_explanations_xgb_logs_artifacts(synth, tmp_path):
     seed = load_params()["seed"]
     X, y = features(synth), synth["TARGET"]

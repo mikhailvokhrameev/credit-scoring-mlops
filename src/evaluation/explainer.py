@@ -88,22 +88,19 @@ class ModelExplainer:
         
         self.shap_values = self._explain(X_sample)
 
-        try:
-            shap_beeswarm_path = self.output_dir / "shap_summary_beeswarm.png"
-            plt.figure(figsize=(10, 6))
-            shap.plots.beeswarm(self.shap_values, max_display=15, show=False)
-            plt.tight_layout()
-            plt.savefig(shap_beeswarm_path, dpi=200, bbox_inches="tight")
-            plt.close()
+        shap_beeswarm_path = self.output_dir / "shap_summary_beeswarm.png"
+        plt.figure(figsize=(10, 6))
+        shap.plots.beeswarm(self.shap_values, max_display=15, show=False)
+        plt.tight_layout()
+        plt.savefig(shap_beeswarm_path, dpi=200, bbox_inches="tight")
+        plt.close()
 
-            shap_bar_path = self.output_dir / "shap_summary_bar.png"
-            plt.figure(figsize=(10, 6))
-            shap.plots.bar(self.shap_values, max_display=15, show=False)
-            plt.tight_layout()
-            plt.savefig(shap_bar_path, dpi=200, bbox_inches="tight")
-            plt.close()
-        except Exception as e:
-            logger.error(f"Error during global SHAP plotting: {e}")
+        shap_bar_path = self.output_dir / "shap_summary_bar.png"
+        plt.figure(figsize=(10, 6))
+        shap.plots.bar(self.shap_values, max_display=15, show=False)
+        plt.tight_layout()
+        plt.savefig(shap_bar_path, dpi=200, bbox_inches="tight")
+        plt.close()
 
         return self.shap_values
 
