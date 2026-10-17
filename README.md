@@ -64,7 +64,7 @@ src/models/      train.py (CLI), tuner.py (Optuna), promote.py, model wrappers
 src/evaluation/  metrics, fairness, SHAP explainer, compare_models (legacy)
 src/monitoring/  PSI drift
 notebooks/       01_EDA, 04_interpretation
-tests/           leakage, schema, metrics, promotion gate, drift, smoke
+tests/           leakage, metrics, promotion gate, drift, smoke
 docs/            datasheet.md, model_card.md
 params.yaml      all parameters, seeds and costs
 dvc.yaml         pipeline graph
@@ -240,7 +240,7 @@ To export models for serving (e.g. LoanSight):
 uv run python export_serving_artifacts.py
 ```
 
-For each `artifacts/<model>_model/` with a `model.joblib` it writes `serving_model.joblib` (the bare estimator) and `metadata.json` (`model_type`, `feature_names`); models that already have both files are skipped. `metrics` and `thresholds` in `metadata.json` are empty: the decision thresholds are taken from the MLflow run artifact `inference/thresholds.json`.
+For each `artifacts/<model>_model/` with a `model.joblib` it writes `serving_model.joblib` (the bare estimator) and `metadata.json` (`model_type`, `feature_names`); models that already have both files are skipped (delete them to re-export after retraining). `metrics` and `thresholds` in `metadata.json` are empty: the decision thresholds are taken from the MLflow run artifact `inference/thresholds.json`.
 
 ---
 
@@ -259,7 +259,7 @@ Tests cover leakage, the promotion gate, drift (PSI), fairness, metric math, see
 
 During the study, five hypotheses were formulated and statistically tested, covering data nature, feature importance, and training method efficiency.
 
-> **Reproducibility.** H1 and H2: the code that produced these figures was deleted together with the old notebooks (commit `144b110`); the repository currently contains no Spearman or Mann–Whitney computation, so they cannot be re-run. H3 can be checked from `artifacts/<model>_model/xai/shap_feature_importance.csv`. H4 and H5 were computed by `src/evaluation/compare_models.py` from `cv_mean_roc_auc`; it is legacy: it looks for `*_non_hpo` runs, which the current `train.py` does not create (`--trials 0` creates a run named `<model>`), so it does not reproduce H5 as is.
+> **Reproducibility.** H1 and H2: the code that produced these figures was deleted together with the old notebooks (commit `144b110`); the repository currently contains no Spearman or Mann–Whitney computation, so they cannot be re-run. H3 can be checked from `artifacts/<model>_model/xai/shap_feature_importance.csv`. H4 and H5 were computed by `src/evaluation/compare_models.py` from `cv_mean_roc_auc`; it is legacy: it looks for `*_non_hpo` runs, which the current `train.py` does not create (`--trials 0` creates a run named `<model>`), so it reproduces neither H4 nor H5 as is.
 
 ---
 

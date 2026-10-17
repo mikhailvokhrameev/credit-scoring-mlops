@@ -22,7 +22,7 @@ See [datasheet.md](datasheet.md). 85% of `application_train` is used for HPO, cr
 
 ## Metrics
 
-Primary evaluation is on the holdout, computed from the MLflow run `Final_Production` after `uv run dvc repro` (`metrics.json` in `artifacts/<model>_model/`; for the single-table baseline trained with `--base`, `artifacts/<model>_base_model/metrics.json`). Besides the columns below, `compute_all_metrics` logs Gini (`holdout_gini`, 2 * ROC-AUC - 1) and the KS statistic (`holdout_ks_statistic`) on the holdout, and the same set on the OOF predictions with the `final_oof_` prefix.
+Primary evaluation is on the holdout, computed from the MLflow run `Final_Production` (for `--base`, the parent run) after `uv run dvc repro` (`metrics.json` in `artifacts/<model>_model/`; for the single-table baseline trained with `--base`, `artifacts/<model>_base_model/metrics.json`). Besides the columns below, `compute_all_metrics` logs Gini (`holdout_gini`, 2 * ROC-AUC - 1) and the KS statistic (`holdout_ks_statistic`) on the holdout, and the same set on the OOF predictions with the `final_oof_` prefix.
 
 | Model | Holdout ROC-AUC | Holdout Gini | Holdout KS | Holdout PR-AUC | Holdout Brier | Holdout business loss |
 |---|---|---|---|---|---|---|
