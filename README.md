@@ -259,6 +259,8 @@ Tests cover leakage, the promotion gate, drift (PSI), fairness, metric math, see
 
 During the study, five hypotheses were formulated and statistically tested, covering data nature, feature importance, and training method efficiency.
 
+> **Reproducibility.** H1 and H2: the code that produced these figures was deleted together with the old notebooks (commit `144b110`); the repository currently contains no Spearman or Mann–Whitney computation, so they cannot be re-run. H3 can be checked from `artifacts/<model>_model/xai/shap_feature_importance.csv`. H4 and H5 were computed by `src/evaluation/compare_models.py` from `cv_mean_roc_auc`; it is legacy: it looks for `*_non_hpo` runs, which the current `train.py` does not create (`--trials 0` creates a run named `<model>`), so it does not reproduce H5 as is.
+
 ---
 
 #### Hypothesis 1 — Age as a Risk Predictor
@@ -340,7 +342,7 @@ During the study, five hypotheses were formulated and statistically tested, cove
 
 > **All tables below are OOF numbers, obtained before the leakage fix (F1).** They are optimistic. Holdout numbers will replace them after `uv run dvc repro` (see [docs/model_card.md](docs/model_card.md)); a holdout ROC-AUC somewhat lower than these figures is expected.
 
-Testing on real data confirmed the advantage of ensemble methods over linear ones. The best result in terms of pure OOF performance is **`xgb_full`** (ROC-AUC = 0.788), while the best balance of performance and speed is **CatBoost**.
+Testing on real data confirmed the advantage of ensemble methods over linear ones. The best result in terms of pure OOF performance is **`xgb_full`** (ROC-AUC = 0.788).
 
 | Algorithm | Version | ROC-AUC (OOF, pre-F1) | PR-AUC (OOF, pre-F1) | Gini (OOF, pre-F1) | Business Loss (OOF, pre-F1) |
 |---|---|---|---|---|---|
