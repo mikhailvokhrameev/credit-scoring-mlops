@@ -1,6 +1,7 @@
-import os
-import pandas as pd
 import logging
+import os
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -27,3 +28,10 @@ class DataLoader:
         tables =['application_train', 'application_test', 'bureau', 'bureau_balance', 
                   'previous_application', 'installments_payments', 'POS_CASH_balance', 'credit_card_balance']
         return {name: self.load_table(name, use_cache=use_cache) for name in tables}
+
+if __name__ == "__main__":
+    # DVC stage `prepare`: cache every raw table as parquet.
+    from src.config import ROOT
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+    DataLoader(raw_dir=str(ROOT / "data" / "raw"), cache_dir=str(ROOT / "data" / "cache")).load_all()

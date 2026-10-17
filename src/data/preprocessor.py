@@ -1,10 +1,13 @@
-import pandas as pd
-import numpy as np
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder
-from sklearn.model_selection import KFold
 import logging
 
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import KFold
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
+
 logger = logging.getLogger(__name__)
+
+MISSING_CATEGORY = "__MISSING__"
 
 
 def one_hot_encoder(train: pd.DataFrame, test: pd.DataFrame) -> tuple:
@@ -40,8 +43,9 @@ def one_hot_encoder(train: pd.DataFrame, test: pd.DataFrame) -> tuple:
     enc.fit(train[categorical_columns])
     
     # Transform both sets
-    train_encoded = pd.DataFrame(enc.transform(train[categorical_columns]), columns=enc.get_feature_names_out(categorical_columns), index=train.index)
-    test_encoded = pd.DataFrame(enc.transform(test[categorical_columns]), columns=enc.get_feature_names_out(categorical_columns), index=test.index)
+    feature_names = enc.get_feature_names_out(categorical_columns)
+    train_encoded = pd.DataFrame(enc.transform(train[categorical_columns]), columns=feature_names, index=train.index)
+    test_encoded = pd.DataFrame(enc.transform(test[categorical_columns]), columns=feature_names, index=test.index)
     
     # Replace original categorical columns with encoded ones
     train = pd.concat([train.drop(columns=categorical_columns), train_encoded], axis=1)
@@ -52,7 +56,7 @@ def one_hot_encoder(train: pd.DataFrame, test: pd.DataFrame) -> tuple:
     return train, test, new_columns
 
 
-def reduce_cardinality(train: pd.DataFrame, test: pd.DataFrame, cardinality_threshold: int = 10) -> tuple:
+def reduce_cardinality(train: pd.DataFrame, test: pd.DataFrame, cardinality_threshold: int) -> tuple:
     """
     Reduces the cardinality of categorical features to prevent overfitting.
     
@@ -63,7 +67,7 @@ def reduce_cardinality(train: pd.DataFrame, test: pd.DataFrame, cardinality_thre
     Args:
         train (pd.DataFrame): Training dataset.
         test (pd.DataFrame): Testing dataset.
-        cardinality_threshold (int): Number of top categories to keep. Default is 10.
+        cardinality_threshold (int): Number of top categories to keep (params.yaml: features.cardinality_threshold).
         
     Returns:
         tuple: (train_transformed, test_transformed, modified_cols)
@@ -91,7 +95,9 @@ def reduce_cardinality(train: pd.DataFrame, test: pd.DataFrame, cardinality_thre
     return train, test, modified_cols
 
 
-def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: pd.Series, n_splits: int = 5) -> tuple:
+def target_encode_cv(
+    train: pd.DataFrame, test: pd.DataFrame, col: str, target: pd.Series, n_splits: int, seed: int
+) -> tuple:
     """
     Applies K-Fold Target Encoding to a categorical feature.
     
@@ -105,7 +111,8 @@ def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: 
         test (pd.DataFrame): Testing dataset.
         col (str): The name of the categorical column to encode.
         target (pd.Series): The target variable series aligned with the train index.
-        n_splits (int): Number of folds for cross-validation. Default is 5.
+        n_splits (int): Number of folds for cross-validation (params.yaml: cv.n_splits).
+        seed (int): Random seed for fold shuffling (params.yaml: seed).
         
     Returns:
         tuple: (train_encoded_series, test_encoded_series)
@@ -113,7 +120,7 @@ def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: 
     train = train.copy()
     test = test.copy()
     
-    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
     
     global_mean = target.mean()
     train_encoded = pd.Series(index=train.index, dtype=float)
@@ -121,7 +128,6 @@ def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: 
     # OOF encoding for train data
     for train_idx, val_idx in kf.split(train):
         X_train, X_val = train.iloc[train_idx], train.iloc[val_idx]
-        y_train = target.iloc[train_idx]
         
         means = X_train.groupby(col)[target.name].mean()
         train_encoded.iloc[val_idx] = X_val[col].map(means)
@@ -135,7 +141,7 @@ def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: 
     return train_encoded, test_encoded
 
 
-def process_side_table(df, train_ids, preprocessor, table_name):
+def process_side_table(df, fit_ids, preprocessor, table_name, cardinality_threshold):
     """
     Cleans and encodes child tables while strictly preventing data leakage.
 
@@ -146,24 +152,27 @@ def process_side_table(df, train_ids, preprocessor, table_name):
 
     The process follows these steps:
     1. Fixes domain-specific anomalies using the provided stateless preprocessor.
-    2. Splits the table into training and testing segments based on the 
-        'SK_ID_CURR' identifiers present in the main application training set.
+    2. Splits the table into a fit segment (rows whose 'SK_ID_CURR' is in
+        `fit_ids`) and a transform-only segment (everything else: holdout and
+        Kaggle test rows).
     3. Reduces categorical cardinality by grouping rare categories into 
-        an 'Other' label, fitting only on the training segment.
+        an 'Other' label, fitting only on the fit segment.
     4. Applies One-Hot Encoding, ensuring the encoder is fitted strictly on 
-        training data to prevent the model from learning test-only categories.
+        the fit segment so holdout/test-only categories are never learned.
 
     Args:
         df (pd.DataFrame): The raw child table to process.
-        train_ids (np.array or list): List of 'SK_ID_CURR' identifiers belonging 
-            to the training set.
+        fit_ids (np.array or list): 'SK_ID_CURR' identifiers the encoders may
+            be fitted on: the application train ids minus the holdout ids.
         preprocessor (object): A preprocessor instance (e.g., PreviousPreprocessor) 
             containing a `fix_anomalies` method.
         table_name (str): Name of the table for logging purposes.
+        cardinality_threshold (int): Number of top categories to keep per categorical
+            column (params.yaml: features.cardinality_threshold).
 
     Returns:
         tuple: A tuple containing:
-            - pd.DataFrame: The processed and recombined (train + test) DataFrame.
+            - pd.DataFrame: The processed and recombined (fit + transform-only) DataFrame.
             - list: Names of the newly generated categorical columns.
     """
     logger.info(f"Preprocessing {table_name}...")
@@ -175,12 +184,12 @@ def process_side_table(df, train_ids, preprocessor, table_name):
     if 'SK_ID_CURR' not in df.columns:
         raise KeyError(f"'SK_ID_CURR' missing in {table_name}")
 
-    # Split into train and test sets for training encoders
-    train_part = df[df['SK_ID_CURR'].isin(train_ids)]
-    test_part = df[~df['SK_ID_CURR'].isin(train_ids)]
+    # Encoders fit on `fit_ids` rows only; holdout and test rows are only transformed
+    train_part = df[df['SK_ID_CURR'].isin(fit_ids)]
+    test_part = df[~df['SK_ID_CURR'].isin(fit_ids)]
 
     # Reduce cardinality
-    train_part, test_part, _ = reduce_cardinality(train_part, test_part)
+    train_part, test_part, _ = reduce_cardinality(train_part, test_part, cardinality_threshold)
     # One-Hot Encoding
     train_part, test_part, cat_cols = one_hot_encoder(train_part, test_part)
 
@@ -228,8 +237,10 @@ class ApplicationPreprocessor:
         Applies Label Encoding strictly fitting on train data.
         
         Maps string categories to integers. To prevent leakage, the encoder is fitted 
-        only on the train set. Unseen categories in the test set are explicitly mapped 
-        to a safe 'UNKNOWN' class to avoid transform errors.
+        only on the train set. Missing values form their own category in both sets
+        (a missing value in the test set gets the train code of missing). Unseen
+        categories in the test set are explicitly mapped to a safe 'UNKNOWN' class
+        to avoid transform errors.
         
         Args:
             train (pd.DataFrame): Training dataset.
@@ -244,6 +255,10 @@ class ApplicationPreprocessor:
         cat_cols = [col for col in train.columns if train[col].dtype == 'object']
         
         for col in cat_cols:
+            # Missing is a real category, encoded the same way in fit and rest
+            train[col] = train[col].fillna(MISSING_CATEGORY)
+            test[col] = test[col].fillna(MISSING_CATEGORY)
+
             le = LabelEncoder()
             le.fit(train[col])
             train[col] = le.transform(train[col])

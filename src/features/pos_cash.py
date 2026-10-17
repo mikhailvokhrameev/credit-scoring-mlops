@@ -1,5 +1,6 @@
-import pandas as pd
 import gc
+
+import pandas as pd
 
 
 def aggregate_pos_cash_features(pos_df: pd.DataFrame, pos_cat: list) -> pd.DataFrame:

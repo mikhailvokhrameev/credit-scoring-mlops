@@ -1,5 +1,6 @@
-import pandas as pd
 import gc
+
+import pandas as pd
 
 
 def aggregate_bureau_balance(bureau_balance_df: pd.DataFrame, bb_cat: list) -> pd.DataFrame:
@@ -98,7 +99,9 @@ def aggregate_bureau_features(bureau_df: pd.DataFrame, bureau_cat: list) -> pd.D
     return bureau_agg
 
 
-def build_bureau_features(bureau_df: pd.DataFrame, bureau_balance_df: pd.DataFrame, bb_cat: list, bureau_cat: list) -> pd.DataFrame:
+def build_bureau_features(
+    bureau_df: pd.DataFrame, bureau_balance_df: pd.DataFrame, bb_cat: list, bureau_cat: list
+) -> pd.DataFrame:
     """
     Orchestrates the end-to-end bureau feature engineering pipeline.
 
