@@ -97,7 +97,7 @@ After training, SHAP values are automatically computed (TreeExplainer for boosti
 
 ---
 
-## Jupyter Notebooks: Research Stages
+## Jupyter Notebooks
 
 The notebooks in [notebooks/](notebooks/) are for exploration and analysis only: they read DVC outputs and `artifacts/` and reuse functions from `src/`. Training and promotion go through the `src/` CLI described below.
 
