@@ -36,6 +36,9 @@ class BaseModel(abc.ABC):
     utilities specifically tailored for business metrics (e.g., cost of default).
     """
     n_estimators_key: Optional[str] = None  # name of the boosting-rounds param, None if not applicable
+    # Name of the constructor param that takes the random seed. `run_training` fills it from
+    # params["seed"]; when absent from `params` the library default seed is used.
+    seed_key: str = "random_state"
 
     def __init__(self, params: Optional[Dict[str, Any]] = None):
         """

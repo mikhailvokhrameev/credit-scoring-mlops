@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 
-from src.config import load_params
 from src.models.base import BaseModel
 
 
@@ -14,6 +13,7 @@ class XGBModel(BaseModel):
     Adjusts scale_pos_weight for imbalanced learning contexts.
     """
     n_estimators_key = "n_estimators"
+    seed_key = "random_state"
 
     def fit(
         self,
@@ -64,5 +64,4 @@ class XGBModel(BaseModel):
             "subsample": trial.suggest_float("subsample", 0.5, 1.0),
             "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
             "eval_metric": "auc",
-            "random_state": load_params()["seed"]
         }

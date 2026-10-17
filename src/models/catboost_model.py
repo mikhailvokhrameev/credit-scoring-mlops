@@ -4,7 +4,6 @@ import catboost as cb
 import numpy as np
 import pandas as pd
 
-from src.config import load_params
 from src.models.base import BaseModel
 
 
@@ -14,6 +13,7 @@ class CatBoostModel(BaseModel):
     Employs 'Balanced' auto class weights for imbalanced datasets.
     """
     n_estimators_key = "iterations"
+    seed_key = "random_seed"
 
     def fit(
         self,
@@ -69,5 +69,4 @@ class CatBoostModel(BaseModel):
             "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1e-3, 10.0, log=True),
             "border_count": trial.suggest_int("border_count", 32, 255),
             "eval_metric": "AUC",
-            "random_seed": load_params()["seed"]
         }

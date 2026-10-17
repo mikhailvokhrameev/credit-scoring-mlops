@@ -4,7 +4,6 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from src.config import load_params
 from src.models.base import BaseModel
 
 
@@ -14,6 +13,7 @@ class LGBMModel(BaseModel):
     Features modern Early Stopping callback to avoid deprecated arguments.
     """
     n_estimators_key = "n_estimators"
+    seed_key = "random_state"
 
     def fit(
         self,
@@ -65,7 +65,6 @@ class LGBMModel(BaseModel):
             "n_estimators": trial.suggest_int("n_estimators", 200, 2000),
             "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
             "num_leaves": trial.suggest_int("num_leaves", 31, 255),
-            "random_state": load_params()["seed"],
         }
         
         if device == "gpu":

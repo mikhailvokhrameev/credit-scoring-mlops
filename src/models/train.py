@@ -275,7 +275,7 @@ def _run_training(
     mlflow.set_tracking_uri(params["mlflow"]["tracking_uri"])
     mlflow.set_experiment(params["mlflow"]["experiment"])
 
-    base_params = {"device": device}
+    base_params = {"device": device, ModelClass.seed_key: seed}
     study_name = make_study_name(model_name, X, y, params)
 
     with mlflow.start_run(run_name=f"{model_name}{suffix}"):

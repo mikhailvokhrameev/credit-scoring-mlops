@@ -7,7 +7,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from src.config import load_params
 from src.models.base import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -19,6 +18,7 @@ class LogRegModel(BaseModel):
     Pipeline: Imputer -> Scaler -> LogReg.
     """
     n_estimators_key = None
+    seed_key = "random_state"  # optional: without a seed in params the library default applies
 
     @staticmethod
     def _cast_ints(X: pd.DataFrame) -> pd.DataFrame:
@@ -57,7 +57,7 @@ class LogRegModel(BaseModel):
                 C=self.params.get('C', 1.0),
                 max_iter=1000,
                 n_jobs=-1,
-                random_state=load_params()["seed"]
+                random_state=self.params.get(self.seed_key)
             ))
         ]
         
