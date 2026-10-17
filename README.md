@@ -99,16 +99,12 @@ After training, SHAP values are automatically computed (TreeExplainer for boosti
 
 ## Jupyter Notebooks: Research Stages
 
-Each stage corresponds to a dedicated notebook in [notebooks/](notebooks/). They serve as an interactive environment for experimentation and leverage functions from `src/`.
+The notebooks in [notebooks/](notebooks/) are for exploration and analysis only: they read DVC outputs and `artifacts/` and reuse functions from `src/`. Training and promotion go through the `src/` CLI described below.
 
 | Notebook | Content |
 |---|---|
 | [01_EDA.ipynb](notebooks/01_EDA.ipynb) | Data loading, HTML table profiling, analysis of imbalance, missing values, and anomalies |
-| [02_feature_engineering.ipynb](notebooks/02_feature_engineering.ipynb) | Pipeline execution, analysis of selected features and their correlations |
-| [03_modelling.ipynb](notebooks/03_modelling.ipynb) | Model comparison, HPO via Optuna, ROC/PR curves, threshold optimization |
-| [04_interpretation.ipynb](notebooks/04_interpretation.ipynb) | Global and local SHAP, comparison of logic across models on a single client |
-
-> **Known limitation:** `03_modelling.ipynb` and `04_interpretation.ipynb` still use the pre-audit API (tuple-returning `cross_validate`, `ModelExplainer` without a seed) and will fail until they are updated. `01_` and `02_` are unaffected by that API change. The `src/` CLI described below is the supported path.
+| [04_interpretation.ipynb](notebooks/04_interpretation.ipynb) | Read-only analysis of trained models: selected features and correlations, global/local SHAP, cross-model comparison on one client |
 
 ---
 
@@ -210,7 +206,7 @@ Open http://127.0.0.1:5000 — model comparison by ROC-AUC, nested HPO/Final_Pro
 
 ### 7. Interpretation and Export
 
-For deep SHAP analysis, use [04_interpretation.ipynb](notebooks/04_interpretation.ipynb) (see the known limitation above).
+For deep SHAP analysis, use [04_interpretation.ipynb](notebooks/04_interpretation.ipynb) or run `make notebooks` to execute it (requires processed data and at least two trained models).
 
 ---
 

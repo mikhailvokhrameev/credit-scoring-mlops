@@ -68,5 +68,4 @@ The champion is rolled back to the previous champion version if, on a fresh labe
 - Holdout size is 15% of the labelled sample (about 46k rows with roughly 8% positives), so AUC differences of a few thousandths between models are within noise; do not rank close models on the holdout alone.
 - Sensitive attributes beyond sex and age (for example family status) are not audited; proxy variables may still encode them.
 - Probability calibration is monitored, not corrected; the score should not be read as a calibrated PD without checking the reliability table.
-- The research notebooks `notebooks/03_modelling.ipynb` and `notebooks/04_interpretation.ipynb` still use the pre-audit training/explainer API and will fail until they are updated; the `src/` CLI is the supported path.
 - SHAP: for XGBoost 3.x boosters the `shap` library cannot parse the model, so native TreeSHAP (`pred_contribs`) is used instead.
