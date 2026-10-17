@@ -30,7 +30,7 @@ Primary evaluation is on the holdout, computed from the MLflow run `Final_Produc
 | XGBoost | `<после dvc repro>` | `<после dvc repro>` | `<после dvc repro>` | `<после dvc repro>` |
 | CatBoost | `<после dvc repro>` | `<после dvc repro>` | `<после dvc repro>` | `<после dvc repro>` |
 
-The README still shows the earlier results (ROC-AUC 0.773 to 0.788). They are OOF numbers obtained before the leakage fix (F1), so they are optimistic; a holdout ROC-AUC lower than those OOF figures is expected after the fix.
+The README still shows the earlier results (ROC-AUC 0.751 to 0.788 across its tables). They are OOF numbers obtained before the leakage fix (F1), so they are optimistic; a holdout ROC-AUC lower than those OOF figures is expected after the fix.
 
 ## Decision threshold and cost
 
@@ -44,7 +44,7 @@ The threshold is the one that minimises the business loss `fn_cost * FN + fp_cos
 
 ## Fairness decisions
 
-- `CODE_GENDER` is excluded from the model features (`features.exclude`) but kept in the holdout frame so the audit can still measure outcomes by sex. Dropping the column does not remove proxy effects, which the audit is meant to catch.
+- `CODE_GENDER` is excluded from the model features (`features.exclude`) but kept in the holdout frame so the audit can still measure outcomes by sex. In the holdout frame the column is label-encoded (the encoder is fitted on the training part), so the fairness CSVs (`guardrails/fairness_gender.csv`) list groups as integer codes (for example 0/1/2), not as F/M/XNA; map them with the fitted encoder. `XNA` is turned into a missing value in the application tables and gets its own class (`__MISSING__`, or `UNKNOWN` if the training part has no missing values). Dropping the column does not remove proxy effects, which the audit is meant to catch.
 - Age (`DAYS_BIRTH`) stays a feature: it carries a strong monotone relationship with default (see Hypothesis 1 in the README) and is a standard underwriting variable, but it is a protected attribute in many jurisdictions. Its use should be reviewed against local regulation before any real deployment; the age-bin audit makes the effect visible.
 - `NAME_FAMILY_STATUS` is not excluded and not audited separately (known gap).
 

@@ -188,7 +188,7 @@ uv run python -m src.models.train --model xgb      --trials 30 --device gpu
 uv run python -m src.models.train --model catboost --trials 30 --device gpu
 ```
 
-**Output** (in `artifacts/<model>_model/`): `model.joblib` (full wrapper), `serving_model.joblib`, `metadata.json`, `metrics.json`, `xai/` (SHAP plots and `shap_feature_importance.csv`), `inference/thresholds.json`. Everything is simultaneously logged to MLflow. The model is refit on the whole training part and scored on the holdout exactly once; holdout metrics, calibration, fairness and drift guardrails are logged with it.
+**Output** (in `artifacts/<model>_model/`): `model.joblib` (full wrapper), `metrics.json`, `xai/` (SHAP plots and `shap_feature_importance.csv`), `guardrails/` (reliability table and plot, per-group fairness CSVs) and `monitoring/` (PSI reports). Everything is simultaneously logged to MLflow; the decision thresholds are stored only there, as the run artifact `inference/thresholds.json`. The model is refit on the whole training part and scored on the holdout exactly once; holdout metrics, calibration, fairness and drift guardrails are logged with it.
 
 > Quick draft model without HPO on a single table: `uv run python -m src.models.train --model lgbm --base --trials 0`.
 
@@ -228,7 +228,7 @@ During the study, five hypotheses were formulated and statistically tested, cove
 
 **Acceptance Criterion:** ρ < −0.7 and p-value < 0.05.
 
-**Result: Confirmed.** ρ = −1.00, exact permutation p = 1/10! ≈ 2.8·10⁻⁷. Default rate is 12.3% for the youngest vs. 3.73% for the oldest decile, with zero violations of monotonicity. These rates were computed on the full labelled training sample before the holdout split was introduced. Ten points support a conclusion about the age trend of the population, not a prediction for a specific client; age is also a protected attribute, so its use is audited (see the [model card](docs/model_card.md)).
+**Result: Confirmed.** ρ = −1.00, exact permutation p = 1/10! ≈ 2.8·10⁻⁷. Default rate is 12.3% for the youngest vs. 3.73% for the oldest decile, with zero violations of monotonicity. These figures are from the original notebook run (pre-audit, before the holdout split) and have not been recomputed here. Ten points support a conclusion about the age trend of the population, not a prediction for a specific client; age is also a protected attribute, so its use is audited (see the [model card](docs/model_card.md)).
 
 <div align="center">
 <img src="https://github.com/user-attachments/assets/e8f7ee0c-d518-43de-a95e-62a07d75ab83" width="600"><br>
@@ -283,9 +283,9 @@ During the study, five hypotheses were formulated and statistically tested, cove
 
 **Testing Method:** Comparison of ROC-AUC between `non_hpo` (default parameters) and `full` (30 Optuna trials) models on the complete dataset for each algorithm.
 
-**Acceptance Criterion:** ROC-AUC gain ≥ 0.005 for at least one algorithm.
+**Acceptance Criterion:** ROC-AUC gain ≥ 0.005 for at least one algorithm; the hypothesis is confirmed in full only if the gain is consistent across algorithms.
 
-**Result: Partially Confirmed.** The criterion is met for XGBoost and CatBoost but not for LightGBM, so the gain depends on the algorithm (OOF, before the leakage fix F1):
+**Result: Partially Confirmed.** The gain is not consistent: XGBoost gains +0.021, CatBoost only reaches the threshold (+0.005, rounded), and LightGBM gains nothing (0.000). The criterion is therefore met for one algorithm clearly, but tuning does not help every algorithm (OOF, before the leakage fix F1):
 
 | Algorithm | ROC-AUC (Non-HPO), OOF pre-F1 | ROC-AUC (Full), OOF pre-F1 | Gain |
 |---|---|---|---|
@@ -318,7 +318,7 @@ Testing on real data confirmed the advantage of ensemble methods over linear one
 **Key Takeaways:**
 
 - **Data enrichment matters more than algorithm complexity.** Transitioning from one table to seven yielded a ROC-AUC gain of +0.020, whereas transitioning from LogReg to XGBoost on full data yielded only +0.015.
-- **PR-AUC is more sensitive than ROC-AUC** under class imbalance: range of 0.235–0.281 versus thousandths of a point in ROC-AUC, making it more informative for rare event tasks.
+- **PR-AUC is more sensitive than ROC-AUC** under class imbalance: PR-AUC spans 0.235–0.281 across the table while ROC-AUC spans 0.751–0.788, and PR-AUC reacts more strongly to the quality of the rare positive class.
 - 4 of 5 hypotheses were confirmed, 1 partially (H5: hyperparameter optimization helps XGBoost and CatBoost, but not LightGBM).
 
 ---

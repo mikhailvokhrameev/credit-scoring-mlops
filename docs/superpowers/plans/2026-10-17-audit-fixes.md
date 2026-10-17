@@ -572,7 +572,7 @@ def test_psi_nan_and_constant():
 3. `uv run dvc repro` с нуля воспроизводит `data/processed/*` и `artifacts/*/metrics.json`. Повторный запуск: «up to date».
 4. `features.top_n: 200` в `params.yaml` → `dvc repro` без правок кода; в MLflow новый `top_n` и новое имя Optuna-study.
 5. В MLflow у `Final_Production` есть `holdout_roc_auc`, `holdout_brier`, `holdout_fairness_min_di`, `psi_score`. Модель в Registry с alias `challenger`, после гейта — `champion`.
-6. `git log main..audit-fixes --format=%B | grep -ci "co-authored-by\|claude"` → `0`.
+6. `git log main..audit-fixes --format=%B | grep -ci "co-authored-by\|generated with"` → `0`.
 
 ## Исполнение
 
