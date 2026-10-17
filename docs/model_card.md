@@ -1,6 +1,6 @@
 # Model card: credit default scoring (Home Credit)
 
-Models: Logistic Regression, LightGBM, XGBoost, CatBoost, trained by `src/models/train.py` and registered in the MLflow Model Registry as `credit_scoring_{model}` (and `credit_scoring_{model}_base` for the single-table baseline). All numbers marked `<после dvc repro>` have not been computed yet: the Kaggle data is not available on the machine where this documentation was written, so the full pipeline has not been run end to end after the leakage fixes. They are filled in from MLflow after `uv run dvc repro`.
+Models: Logistic Regression, LightGBM, XGBoost, CatBoost, trained by `src/models/train.py` and registered in the MLflow Model Registry as `credit_scoring_{model}` (and `credit_scoring_{model}_base` for the single-table baseline). All numbers marked TBD (after dvc repro) have not been computed yet: the Kaggle data is not available on the machine where this documentation was written, so the full pipeline has not been run end to end after the leakage fixes. They are filled in from MLflow after `uv run dvc repro`.
 
 ## Intended use
 
@@ -15,20 +15,21 @@ See [datasheet.md](datasheet.md). 85% of `application_train` is used for HPO, cr
 ## Model and training
 
 - Features: aggregation of seven tables, top `features.top_n` (300) selected by Ridge on the training part.
-- Hyperparameters: Optuna (`hpo.trials`, `hpo.n_splits`), seeds and costs from `params.yaml`; the Optuna study name embeds a hash of data and config.
-- Final fit: 5-fold stratified CV gives out-of-fold (OOF) predictions for the OOF metrics and the threshold; the final model is refit on the whole training part and scored once on the holdout.
+- Hyperparameters: Optuna (`hpo.trials`, `hpo.n_splits` = 3 folds), seeds and costs from `params.yaml`; the Optuna study name embeds a hash of data and config.
+- Early stopping (boosters): a `train.early_stopping_fraction` (0.1) share of each training fold is held out for it, in HPO and in the final CV.
+- Final fit: stratified CV with `cv.n_splits` (5) folds gives out-of-fold (OOF) predictions for the OOF metrics and the threshold; the final model is refit on the whole training part and scored once on the holdout.
 - Environment: `uv.lock`; pipeline: `dvc.yaml`.
 
 ## Metrics
 
-Primary evaluation is on the holdout, computed from the MLflow run `Final_Production` after `uv run dvc repro` (`metrics.json` in `artifacts/<model>_model/`).
+Primary evaluation is on the holdout, computed from the MLflow run `Final_Production` after `uv run dvc repro` (`metrics.json` in `artifacts/<model>_model/`; for the single-table baseline trained with `--base`, `artifacts/<model>_base_model/metrics.json`). Besides the columns below, `compute_all_metrics` logs Gini (`holdout_gini`, 2 * ROC-AUC - 1) and the KS statistic (`holdout_ks_statistic`) on the holdout, and the same set on the OOF predictions with the `final_oof_` prefix.
 
-| Model | Holdout ROC-AUC | Holdout PR-AUC | Holdout Brier | Holdout business loss |
-|---|---|---|---|---|
-| LogReg | `<после dvc repro>` | `<после dvc repro>` | `<после dvc repro>` | `<после dvc repro>` |
-| LightGBM | `<после dvc repro>` | `<после dvc repro>` | `<после dvc repro>` | `<после dvc repro>` |
-| XGBoost | `<после dvc repro>` | `<после dvc repro>` | `<после dvc repro>` | `<после dvc repro>` |
-| CatBoost | `<после dvc repro>` | `<после dvc repro>` | `<после dvc repro>` | `<после dvc repro>` |
+| Model | Holdout ROC-AUC | Holdout Gini | Holdout KS | Holdout PR-AUC | Holdout Brier | Holdout business loss |
+|---|---|---|---|---|---|---|
+| LogReg | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) |
+| LightGBM | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) |
+| XGBoost | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) |
+| CatBoost | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) | TBD (after dvc repro) |
 
 The README still shows the earlier results (ROC-AUC 0.751 to 0.788 across its tables). They are OOF numbers obtained before the leakage fix (F1), so they are optimistic; a holdout ROC-AUC lower than those OOF figures is expected after the fix.
 
@@ -68,4 +69,8 @@ The champion is rolled back to the previous champion version if, on a fresh labe
 - Holdout size is 15% of the labelled sample (about 46k rows with roughly 8% positives), so AUC differences of a few thousandths between models are within noise; do not rank close models on the holdout alone.
 - Sensitive attributes beyond sex and age (for example family status) are not audited; proxy variables may still encode them.
 - Probability calibration is monitored, not corrected; the score should not be read as a calibrated PD without checking the reliability table.
-- SHAP: for XGBoost 3.x boosters the `shap` library cannot parse the model, so native TreeSHAP (`pred_contribs`) is used instead.
+- SHAP: for XGBoost, `shap.TreeExplainer` is tried first; with xgboost 3.x boosters it can fail to parse the model, and then native TreeSHAP (`pred_contribs`) is the fallback (a permutation explainer is the last resort).
+
+## Serving
+
+`uv run python export_serving_artifacts.py` exports each trained model for the [LoanSight](https://github.com/mikhailvokhrameev/loan_sight.git) app as `artifacts/<model>_model/serving_model.joblib` and `metadata.json` (base models: `artifacts/<model>_base_model/`). `metrics` and `thresholds` in that `metadata.json` are empty; the decision threshold comes from the MLflow artifact `inference/thresholds.json`.
