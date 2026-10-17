@@ -1,13 +1,13 @@
+import logging
+from typing import Any, Dict, Optional
+
 import pandas as pd
-import mlflow.sklearn
-from typing import Dict, Any
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
+
 from src.models.base import BaseModel
-from sklearn.impute import SimpleImputer
-import logging
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -17,42 +17,31 @@ class LogRegModel(BaseModel):
     Fast Baseline Logistic Regression.
     Pipeline: Imputer -> Scaler -> LogReg.
     """
-    def _sanitize_columns(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Removes special characters from column names"""
-        X = X.copy()
-        X.columns =[
-            re.sub(r"[^0-9a-zA-Z_]+", "_", str(c))
-            for c in X.columns
-        ]
+    n_estimators_key = None
+    seed_key = "random_state"  # optional: without a seed in params the library default applies
+
+    @staticmethod
+    def _cast_ints(X: pd.DataFrame) -> pd.DataFrame:
+        """Casts integer columns to float64 so fit and predict see identical dtypes."""
+        int_cols = X.select_dtypes(include='integer').columns
+        X[int_cols] = X[int_cols].astype('float64')
         return X
 
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        return self._cast_ints(super().transform(X).copy())
 
-    def _align_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        X = X.copy()
-        
-        if not hasattr(self, "features_"):
-            raise ValueError("Model is not fitted yet")
-
-        missing = set(self.features_) - set(X.columns)
-        for col in missing:
-            X[col] = 0
-
-        return X.reindex(columns=self.features_)
-    
-    
-    def transform(self, X):
+    def fit(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        eval_set=None,
+        early_stopping_rounds: Optional[int] = None,
+    ) -> 'LogRegModel':
+        self.best_iteration_ = None
         X = self._sanitize_columns(X)
-        X = self._align_features(X)
-        return X
-    
-    
-    def fit(self, X: pd.DataFrame, y: pd.Series, eval_set=None) -> 'LogRegModel':
-        X = self._sanitize_columns(X)
-        
-        numeric_cols = X.select_dtypes(include=['int64', 'int32', 'integer']).columns
-        X[numeric_cols] = X[numeric_cols].astype('float64')
         
         self.features_ = list(X.columns) # Save sanitized features list
+        X = self._cast_ints(X)
         
         # Choose solver based on penalty
         penalty = self.params.get('penalty', 'l2')
@@ -68,13 +57,12 @@ class LogRegModel(BaseModel):
                 C=self.params.get('C', 1.0),
                 max_iter=1000,
                 n_jobs=-1,
-                random_state=42
+                random_state=self.params.get(self.seed_key)
             ))
         ]
         
         self.model = Pipeline(pipeline_steps)
         
-        mlflow.sklearn.autolog(log_models=False) # Log params, metrics, learning time
         self.model.fit(X, y)
         
         return self

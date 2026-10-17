@@ -234,5 +234,16 @@ mlruns/
 *.db
 
 .DS_Store
-/artifacts
+
+# Model artifacts: ignore everything except the DVC-tracked (cache: false) metrics of the
+# `train` stage, so `dvc metrics diff` works from git. model.joblib is a DVC out (DVC adds its own
+# artifacts/.gitignore); `--base` runs (artifacts/*_base_model) are not DVC stages and stay ignored.
+/artifacts/*
+!/artifacts/*_model/
+/artifacts/*_model/*
+!/artifacts/*_model/metrics.json
+/artifacts/*_base_model/
 /.vscode
+# superpowers (agent plans and scratch)
+/.superpowers/
+/docs/superpowers/

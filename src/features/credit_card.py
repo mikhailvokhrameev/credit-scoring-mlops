@@ -1,5 +1,6 @@
-import pandas as pd
 import gc
+
+import pandas as pd
 
 
 def aggregate_credit_card_features(cc_df: pd.DataFrame, cc_cat: list) -> pd.DataFrame:
@@ -51,7 +52,7 @@ def create_credit_card_customer_features(cc_agg: pd.DataFrame) -> pd.DataFrame:
     
     # Calculate average utilization of the credit limit
     if 'CC_AMT_BALANCE_MEAN' in cc_agg.columns and 'CC_AMT_CREDIT_LIMIT_ACTUAL_MEAN' in cc_agg.columns:
-        cc_agg['CC_LIMIT_USE_MEAN'] = (cc_agg['CC_AMT_BALANCE_MEAN'] / (cc_agg['CC_AMT_CREDIT_LIMIT_ACTUAL_MEAN'] + 1e-5))
+        cc_agg['CC_LIMIT_USE_MEAN'] = cc_agg['CC_AMT_BALANCE_MEAN'] / (cc_agg['CC_AMT_CREDIT_LIMIT_ACTUAL_MEAN'] + 1e-5)
         
     return cc_agg
 

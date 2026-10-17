@@ -1,5 +1,6 @@
-import pandas as pd
 import gc
+
+import pandas as pd
 
 
 def create_previous_row_features(prev_df: pd.DataFrame) -> pd.DataFrame:

@@ -1,73 +1,55 @@
+from typing import Any, Dict, Optional
+
 import lightgbm as lgb
-import pandas as pd
 import numpy as np
-from typing import Dict, Any
+import pandas as pd
+
 from src.models.base import BaseModel
-import re
+
 
 class LGBMModel(BaseModel):
     """
     LightGBM implementation for credit default risk prediction.
     Features modern Early Stopping callback to avoid deprecated arguments.
     """
-    def _sanitize_columns(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Removes special characters from column names to comply with LightGBM constraints"""
-        X = X.copy()
-        X.columns = [
-            re.sub(r"[^0-9a-zA-Z_]+", "_", str(c))
-            for c in X.columns
-        ]
-        return X
-    
-    
-    def _align_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Ensures inference data has the exact same columns as training data"""
-        X = X.copy()
+    n_estimators_key = "n_estimators"
+    seed_key = "random_state"
 
-        if not hasattr(self, "features_"):
-            raise ValueError("Model is not fitted yet (features_ not found)")
-
-        missing = set(self.features_) - set(X.columns)
-        for col in missing:
-            X[col] = 0
-
-        return X[self.features_]
-
-
-    def transform(self, X):
+    def fit(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        eval_set=None,
+        early_stopping_rounds: Optional[int] = None,
+    ) -> 'LGBMModel':
         X = self._sanitize_columns(X)
-        X = self._align_features(X)
-        return X
-    
-    
-    def fit(self, X: pd.DataFrame, y: pd.Series, eval_set=None) -> 'LGBMModel':
-        X = self._sanitize_columns(X)
-
-        if eval_set is not None:
-            X_val = self._sanitize_columns(eval_set[0])
-            y_val = eval_set[1]
-            eval_data = [(X_val, y_val)]
-        else:
-            eval_data = None
-
         self.features_ = list(X.columns)
 
-        self.model = lgb.LGBMClassifier(**self.params)
-
+        fit_kwargs = {}
         callbacks = []
-
-        if eval_data is not None:
-            callbacks.append(lgb.early_stopping(stopping_rounds=100, verbose=False))
+        use_early_stopping = eval_set is not None and early_stopping_rounds is not None
+        if eval_set is not None:
+            fit_kwargs = {
+                "eval_X": self._sanitize_columns(eval_set[0])[self.features_],
+                "eval_y": eval_set[1],
+            }
+        if use_early_stopping:
+            callbacks.append(lgb.early_stopping(stopping_rounds=early_stopping_rounds, verbose=False))
             callbacks.append(lgb.log_evaluation(period=50))
 
-        self.model.fit(X, y, eval_set=eval_data, eval_metric="auc", callbacks=callbacks)
+        self.model = lgb.LGBMClassifier(**dict(self.params))
+        self.model.fit(X, y, eval_metric="auc", callbacks=callbacks, **fit_kwargs)
+        self.best_iteration_ = None
+        if use_early_stopping:
+            # LightGBM reports a 1-based count, 0 when it recorded no best round.
+            raw = int(self.model.best_iteration_)
+            self.best_iteration_ = raw - 1 if raw > 0 else self.model.booster_.current_iteration() - 1
 
         return self
-    
+
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        X = self._sanitize_columns(X)
-        X = self._align_features(X)
+        X = self.transform(X)
         return self.model.predict_proba(X)[:, 1]
 
 
@@ -83,7 +65,6 @@ class LGBMModel(BaseModel):
             "n_estimators": trial.suggest_int("n_estimators", 200, 2000),
             "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
             "num_leaves": trial.suggest_int("num_leaves", 31, 255),
-            "random_state": 42,
         }
         
         if device == "gpu":

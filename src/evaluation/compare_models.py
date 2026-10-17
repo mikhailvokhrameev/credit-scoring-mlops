@@ -1,11 +1,14 @@
-import mlflow
-import pandas as pd
-import numpy as np
 import os
-from scipy.stats import wilcoxon
 
-EXPERIMENT_NAME = "Home_Credit_Default_Risk"
-MLFLOW_DB_URI = "sqlite:///mlflow.db"
+import mlflow
+import numpy as np
+import pandas as pd
+
+from src.config import load_params
+
+_MLFLOW = load_params()["mlflow"]
+EXPERIMENT_NAME = _MLFLOW["experiment"]
+MLFLOW_DB_URI = _MLFLOW["tracking_uri"]
 REPORT_DIR = "src/evaluation/report/"
 REPORT_PATH = os.path.join(REPORT_DIR, "model_comparison_report.md")
 
@@ -40,7 +43,10 @@ class MLflowEvaluator:
                 # Find nested run "Final_Production" for this parent
                 child_runs = mlflow.search_runs(
                     experiment_ids=[self.experiment_id],
-                    filter_string=f"tags.mlflow.parentRunId = '{parent.run_id}' AND tags.mlflow.runName = 'Final_Production'"
+                    filter_string=(
+                        f"tags.mlflow.parentRunId = '{parent.run_id}' "
+                        "AND tags.mlflow.runName = 'Final_Production'"
+                    )
                 )
                 if not child_runs.empty:
                     target_runs_list.append(child_runs.iloc[0])
@@ -115,12 +121,15 @@ def generate_report(df):
             diff_h1 = lgbm_v2.cv_mean_roc_auc - lgbm_v3.cv_mean_roc_auc
             h1_status = "Confirmed!" if diff_h1 >= 0.015 else "Not confirmed"
             
-            f.write(f"### Hypothesis 1: The Value of External Tables (Full vs Base)\n")
-            f.write(f"- **Full Data AUC**: {lgbm_v2.cv_mean_roc_auc:.4f}, **Base Table AUC**: {lgbm_v3.cv_mean_roc_auc:.4f}\n")
+            f.write("### Hypothesis 1: The Value of External Tables (Full vs Base)\n")
+            f.write(
+                f"- **Full Data AUC**: {lgbm_v2.cv_mean_roc_auc:.4f}, "
+                f"**Base Table AUC**: {lgbm_v3.cv_mean_roc_auc:.4f}\n"
+            )
             f.write(f"- **Increase**: {diff_h1:.4f} (needed >= 0.015)\n")
             f.write(f"- **Result**: {h1_status}\n\n")
-        except Exception as e:
-            f.write(f"### Hypothesis 1: Calculation error\n\n")
+        except Exception:
+            f.write("### Hypothesis 1: Calculation error\n\n")
 
         # Second Hypothesis
         try:
@@ -133,11 +142,11 @@ def generate_report(df):
             avg_gain = np.mean(hpo_gains)
             h2_status = "Confirmed!" if avg_gain >= 0.005 else "Not confirmed"
             
-            f.write(f"### Hypothesis 2: The effectiveness of Optuna (v1 vs v2)\n")
+            f.write("### Hypothesis 2: The effectiveness of Optuna (v1 vs v2)\n")
             f.write(f"- **Average increase in AUC**: {avg_gain:.5f} (needed >= 0.005)\n")
             f.write(f"- **Result**: {h2_status}\n\n")
-        except Exception as e:
-            f.write(f"### Hypothesis 2: Calculation error\n\n")
+        except Exception:
+            f.write("### Hypothesis 2: Calculation error\n\n")
 
 if __name__ == "__main__":
     evaluator = MLflowEvaluator()
