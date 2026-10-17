@@ -7,6 +7,7 @@ import nbformat
 import pytest
 
 NOTEBOOKS = sorted(Path(__file__).resolve().parents[1].joinpath("notebooks").glob("*.ipynb"))
+assert NOTEBOOKS, "no notebooks found in notebooks/"
 
 
 def _code_cells(nb_path: Path) -> list[str]:

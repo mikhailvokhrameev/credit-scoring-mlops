@@ -28,7 +28,7 @@ Training/research pipeline for credit default scoring on Home Credit (7 relation
 - Model wrappers must not mutate `self.params`: CV fold clones share it.
 - `CODE_GENDER` is excluded from model features (`features.exclude`) but kept for the fairness audit; `DAYS_BIRTH` stays a feature. `promote.py` blocks `champion` when holdout `holdout_fairness_min_di` < `fairness.di_min`.
 - `365243` in `DAYS_*` columns is a missing-value sentinel, handled in `src/data/preprocessor.py`.
-- Notebooks only read DVC outputs/`artifacts/`; `make notebooks` executes 04 (needs data + ≥2 trained models); `tests/test_notebooks.py` checks `src` imports and cleared outputs.
+- Notebooks only read DVC outputs/`artifacts/`; `make notebooks` executes 04 (needs data + the `lgbm` model and at least one other trained model); `tests/test_notebooks.py` checks `src` imports and cleared outputs.
 
 ## Docs (read on demand)
 - Data: `docs/datasheet.md` · Model: `docs/model_card.md` · Params: `params.yaml`

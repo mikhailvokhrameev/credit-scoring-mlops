@@ -206,7 +206,7 @@ Open http://127.0.0.1:5000 — model comparison by ROC-AUC, nested HPO/Final_Pro
 
 ### 7. Interpretation and Export
 
-For deep SHAP analysis, use [04_interpretation.ipynb](notebooks/04_interpretation.ipynb) or run `make notebooks` to execute it (requires processed data and at least two trained models).
+For deep SHAP analysis, use [04_interpretation.ipynb](notebooks/04_interpretation.ipynb) or run `make notebooks` to execute it (requires processed data and the `lgbm` model and at least one other trained model).
 
 ---
 
