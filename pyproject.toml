@@ -39,3 +39,10 @@ notebooks = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["smoke: end-to-end smoke tests on synthetic data"]
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
