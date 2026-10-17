@@ -1,5 +1,6 @@
 """Static checks that keep the notebooks from drifting away from `src/` (nothing is executed)."""
 import ast
+import importlib.util
 from importlib import import_module
 from pathlib import Path
 
@@ -29,16 +30,61 @@ def test_code_cells_parse(nb_path):
             pytest.fail(f"{nb_path.name}, code cell {i}: {e}")
 
 
+def _is_src(name: str | None) -> bool:
+    return name == "src" or (name or "").startswith("src.")
+
+
+def _has_submodule(package: str, name: str) -> bool:
+    try:
+        return importlib.util.find_spec(f"{package}.{name}") is not None
+    except ModuleNotFoundError:  # `package` is a plain module, not a package
+        return False
+
+
+def _unresolved_src_imports(source: str) -> list[str]:
+    """Every `src` import in `source` (any form) that does not resolve, as readable strings."""
+    errors = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if _is_src(alias.name):
+                    try:
+                        import_module(alias.name)
+                    except ModuleNotFoundError:
+                        errors.append(f"`import {alias.name}` does not resolve")
+        elif isinstance(node, ast.ImportFrom) and _is_src(node.module):
+            try:
+                module = import_module(node.module)
+            except ModuleNotFoundError:
+                errors.append(f"`from {node.module} import ...` does not resolve")
+                continue
+            for alias in node.names:
+                if not hasattr(module, alias.name) and not _has_submodule(node.module, alias.name):
+                    errors.append(f"`from {node.module} import {alias.name}` does not resolve")
+    return errors
+
+
 @pytest.mark.parametrize("nb_path", NOTEBOOKS, ids=lambda p: p.name)
 def test_src_imports_resolve(nb_path):
     for i, cell in enumerate(_code_cells(nb_path)):
-        for node in ast.walk(ast.parse(_python_source(cell))):
-            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("src."):
-                module = import_module(node.module)
-                for alias in node.names:
-                    assert hasattr(module, alias.name), (
-                        f"{nb_path.name}, code cell {i}: `from {node.module} import {alias.name}` does not resolve"
-                    )
+        errors = _unresolved_src_imports(_python_source(cell))
+        assert not errors, f"{nb_path.name}, code cell {i}: {errors}"
+
+
+@pytest.mark.parametrize(
+    "source, ok",
+    [
+        ("import src.config", True),
+        ("from src import config", True),
+        ("from src.config import load_params", True),
+        ("from src.models import train", True),
+        ("import src.nope", False),
+        ("from src import nope", False),
+        ("from src.config import nope", False),
+    ],
+)
+def test_unresolved_src_imports_detects_all_forms(source, ok):
+    assert (_unresolved_src_imports(source) == []) is ok
 
 
 @pytest.mark.parametrize("nb_path", NOTEBOOKS, ids=lambda p: p.name)
