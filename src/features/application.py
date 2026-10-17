@@ -1,5 +1,6 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 
 def build_application_features(df: pd.DataFrame):
     df = df.copy()
@@ -13,12 +14,16 @@ def build_application_features(df: pd.DataFrame):
     df['ANNUITY_INCOME_RATIO'] = df['AMT_ANNUITY'] / (df['AMT_INCOME_TOTAL'] + 1e-5)
     
     # Finance indicators
-    df['CREDIT_INCOME_PERCENT'] = df['AMT_CREDIT'] / df['AMT_INCOME_TOTAL'] # Share of annual income represented by the requested credit
-    df['ANNUITY_INCOME_PERCENT'] = df['AMT_ANNUITY'] / df['AMT_INCOME_TOTAL'] # Ratio of annual loan payment to total annual income
-    df['CREDIT_TERM'] = df['AMT_ANNUITY'] / df['AMT_CREDIT'] # Debt repayment rate (relative payment size compared to credit amount)
+    # Share of annual income represented by the requested credit
+    df['CREDIT_INCOME_PERCENT'] = df['AMT_CREDIT'] / df['AMT_INCOME_TOTAL']
+    # Ratio of annual loan payment to total annual income
+    df['ANNUITY_INCOME_PERCENT'] = df['AMT_ANNUITY'] / df['AMT_INCOME_TOTAL']
+    # Debt repayment rate (relative payment size compared to credit amount)
+    df['CREDIT_TERM'] = df['AMT_ANNUITY'] / df['AMT_CREDIT']
     df['DAYS_EMPLOYED_PERCENT'] = df['DAYS_EMPLOYED'] / df['DAYS_BIRTH'] # Employment duration relative to age
     df['CREDIT_GOODS_RATIO'] = df['AMT_CREDIT'] / df['AMT_GOODS_PRICE'] # Ratio of credit amount to goods price
-    df['CREDIT_DOWNPAYMENT'] = df['AMT_GOODS_PRICE'] - df['AMT_CREDIT'] # Down payment amount (difference between goods price and issued credit)
+    # Down payment amount (difference between goods price and issued credit)
+    df['CREDIT_DOWNPAYMENT'] = df['AMT_GOODS_PRICE'] - df['AMT_CREDIT']
     
     # Aggregations
     ext_cols = ['EXT_SOURCE_1', 'EXT_SOURCE_2', 'EXT_SOURCE_3']

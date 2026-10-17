@@ -5,9 +5,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.config import load_params
 from src.data.preprocessor import ApplicationPreprocessor, PassThroughPreprocessor, process_side_table
 from src.data.split import load_ids, make_holdout_ids, save_ids
-from src.config import load_params
 from src.features.pipeline import FeatureEngineeringPipeline, select_features_ridge, write_feature_sets
 from tests.conftest import features
 

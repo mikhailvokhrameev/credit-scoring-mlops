@@ -1,34 +1,35 @@
-import pandas as pd
-import numpy as np
-import json
-import mlflow
-import logging
 import gc
+import json
+import logging
 from pathlib import Path
-from sklearn.linear_model import Ridge
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
+
+import mlflow
+import numpy as np
+import pandas as pd
 from sklearn.feature_selection import SelectFromModel
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import Ridge
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+from src.config import ROOT, load_params
 from src.data.loader import DataLoader
 from src.data.preprocessor import (
     ApplicationPreprocessor,
-    PreviousPreprocessor,
-    POSCashPreprocessor,
     CreditCardPreprocessor,
     InstallmentsPreprocessor,
     PassThroughPreprocessor,
-    process_side_table
+    POSCashPreprocessor,
+    PreviousPreprocessor,
+    process_side_table,
 )
+from src.data.split import load_holdout_ids
 from src.features.application import build_application_features
 from src.features.bureau import build_bureau_features
-from src.features.previous import build_previous_features
+from src.features.credit_card import build_credit_card_features
 from src.features.installments import build_installments_features
 from src.features.pos_cash import build_pos_cash_features
-from src.features.credit_card import build_credit_card_features
-from src.config import ROOT, load_params
-from src.data.split import load_holdout_ids
-
+from src.features.previous import build_previous_features
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -211,7 +212,9 @@ class FeatureEngineeringPipeline:
             train_ids = train_raw['SK_ID_CURR'].unique()
             unknown = np.setdiff1d(holdout_ids, train_ids)
             if len(unknown):
-                raise ValueError(f"{len(unknown)} holdout ids are not in application_train, e.g. {unknown[:5].tolist()}")
+                raise ValueError(
+                    f"{len(unknown)} holdout ids are not in application_train, e.g. {unknown[:5].tolist()}"
+                )
             fit_ids = np.setdiff1d(train_ids, holdout_ids)
             logger.info(f"Fit rows: {len(fit_ids)}, holdout rows: {len(holdout_ids)}")
             
@@ -231,13 +234,17 @@ class FeatureEngineeringPipeline:
             # Bureau and Bureau Balance
             bureau_curr_map = data['bureau'][['SK_ID_BUREAU', 'SK_ID_CURR']].drop_duplicates()
             
-            bureau, bureau_cat = process_side_table(data['bureau'], fit_ids, self.generic_preprocessor, "Bureau", cardinality_threshold)
+            bureau, bureau_cat = process_side_table(
+                data['bureau'], fit_ids, self.generic_preprocessor, "Bureau", cardinality_threshold
+            )
             del data['bureau']
             
             bureau_balance = data['bureau_balance'].merge(bureau_curr_map, on='SK_ID_BUREAU', how='inner')
             del data['bureau_balance'], bureau_curr_map
             
-            bb, bb_cat = process_side_table(bureau_balance, fit_ids, self.generic_preprocessor, "Bureau Balance", cardinality_threshold)
+            bb, bb_cat = process_side_table(
+                bureau_balance, fit_ids, self.generic_preprocessor, "Bureau Balance", cardinality_threshold
+            )
             del bureau_balance
             gc.collect()
 
@@ -246,7 +253,9 @@ class FeatureEngineeringPipeline:
             gc.collect()
 
             # Previous applications
-            prev, prev_cat = process_side_table(data['previous_application'], fit_ids, self.prev_preprocessor, "Previous", cardinality_threshold)
+            prev, prev_cat = process_side_table(
+                data['previous_application'], fit_ids, self.prev_preprocessor, "Previous", cardinality_threshold
+            )
             del data['previous_application']
             
             previous_features = build_previous_features(prev, prev_cat)
@@ -262,7 +271,9 @@ class FeatureEngineeringPipeline:
             gc.collect()
 
             # Pos cash
-            pos, pos_cat = process_side_table(data['POS_CASH_balance'], fit_ids, self.pos_preprocessor, "POS CASH", cardinality_threshold)
+            pos, pos_cat = process_side_table(
+                data['POS_CASH_balance'], fit_ids, self.pos_preprocessor, "POS CASH", cardinality_threshold
+            )
             del data['POS_CASH_balance']
             
             pos_features = build_pos_cash_features(pos, pos_cat)
@@ -270,7 +281,9 @@ class FeatureEngineeringPipeline:
             gc.collect()
 
             # Credit card
-            cc, cc_cat = process_side_table(data['credit_card_balance'], fit_ids, self.cc_preprocessor, "Credit Card", cardinality_threshold)
+            cc, cc_cat = process_side_table(
+                data['credit_card_balance'], fit_ids, self.cc_preprocessor, "Credit Card", cardinality_threshold
+            )
             del data['credit_card_balance']
             
             cc_features = build_credit_card_features(cc, cc_cat)
@@ -279,19 +292,24 @@ class FeatureEngineeringPipeline:
             
             # Merge features
             df = df.merge(bureau_features, on='SK_ID_CURR', how='left')
-            del bureau_features; gc.collect()
+            del bureau_features
+            gc.collect()
             
             df = df.merge(previous_features, on='SK_ID_CURR', how='left')
-            del previous_features; gc.collect()
+            del previous_features
+            gc.collect()
             
             df = df.merge(installments_features, on='SK_ID_CURR', how='left')
-            del installments_features; gc.collect()
+            del installments_features
+            gc.collect()
             
             df = df.merge(pos_features, on='SK_ID_CURR', how='left')
-            del pos_features; gc.collect()
+            del pos_features
+            gc.collect()
             
             df = df.merge(cc_features, on='SK_ID_CURR', how='left')
-            del cc_features; gc.collect()
+            del cc_features
+            gc.collect()
             
             gc.collect()
             

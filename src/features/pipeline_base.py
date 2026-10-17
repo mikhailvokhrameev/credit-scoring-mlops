@@ -1,11 +1,12 @@
-import pandas as pd
-import logging
 import gc
+import logging
+
+import pandas as pd
 
 from src.config import ROOT, load_params
 from src.data.loader import DataLoader
-from src.data.split import load_holdout_ids
 from src.data.preprocessor import ApplicationPreprocessor
+from src.data.split import load_holdout_ids
 from src.features.application import build_application_features
 from src.features.pipeline import write_feature_sets
 

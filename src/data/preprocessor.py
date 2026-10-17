@@ -1,8 +1,9 @@
-import pandas as pd
-import numpy as np
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder
-from sklearn.model_selection import KFold
 import logging
+
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import KFold
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,9 @@ def one_hot_encoder(train: pd.DataFrame, test: pd.DataFrame) -> tuple:
     enc.fit(train[categorical_columns])
     
     # Transform both sets
-    train_encoded = pd.DataFrame(enc.transform(train[categorical_columns]), columns=enc.get_feature_names_out(categorical_columns), index=train.index)
-    test_encoded = pd.DataFrame(enc.transform(test[categorical_columns]), columns=enc.get_feature_names_out(categorical_columns), index=test.index)
+    feature_names = enc.get_feature_names_out(categorical_columns)
+    train_encoded = pd.DataFrame(enc.transform(train[categorical_columns]), columns=feature_names, index=train.index)
+    test_encoded = pd.DataFrame(enc.transform(test[categorical_columns]), columns=feature_names, index=test.index)
     
     # Replace original categorical columns with encoded ones
     train = pd.concat([train.drop(columns=categorical_columns), train_encoded], axis=1)
@@ -93,7 +95,9 @@ def reduce_cardinality(train: pd.DataFrame, test: pd.DataFrame, cardinality_thre
     return train, test, modified_cols
 
 
-def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: pd.Series, n_splits: int, seed: int) -> tuple:
+def target_encode_cv(
+    train: pd.DataFrame, test: pd.DataFrame, col: str, target: pd.Series, n_splits: int, seed: int
+) -> tuple:
     """
     Applies K-Fold Target Encoding to a categorical feature.
     
@@ -124,7 +128,6 @@ def target_encode_cv(train: pd.DataFrame, test: pd.DataFrame, col: str, target: 
     # OOF encoding for train data
     for train_idx, val_idx in kf.split(train):
         X_train, X_val = train.iloc[train_idx], train.iloc[val_idx]
-        y_train = target.iloc[train_idx]
         
         means = X_train.groupby(col)[target.name].mean()
         train_encoded.iloc[val_idx] = X_val[col].map(means)

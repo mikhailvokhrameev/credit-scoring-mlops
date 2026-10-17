@@ -1,12 +1,14 @@
+import logging
+from typing import Any, Dict, Optional
+
 import pandas as pd
-from typing import Dict, Any, Optional
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
+
 from src.config import load_params
 from src.models.base import BaseModel
-from sklearn.impute import SimpleImputer
-import logging
 
 logger = logging.getLogger(__name__)
 

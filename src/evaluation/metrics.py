@@ -1,11 +1,12 @@
 import logging
 from pathlib import Path
 from typing import Dict, Tuple
+
+import mlflow
 import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
-from sklearn.metrics import roc_auc_score, average_precision_score, brier_score_loss
-import mlflow
+from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 
 logger = logging.getLogger(__name__)
 

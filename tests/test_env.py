@@ -1,5 +1,10 @@
 def test_heavy_imports():
-    import lightgbm, xgboost, catboost, mlflow, shap, optuna  # noqa: F401
+    import catboost  # noqa: F401
+    import lightgbm  # noqa: F401
+    import mlflow  # noqa: F401
+    import optuna  # noqa: F401
+    import shap  # noqa: F401
+    import xgboost  # noqa: F401
 
 
 def test_synthetic_df_shape(synth):

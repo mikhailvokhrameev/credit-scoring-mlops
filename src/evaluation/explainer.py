@@ -1,21 +1,17 @@
 import logging
 import warnings
-
-import shap
-
-import numpy as np
-import pandas as pd
+from pathlib import Path
 
 import matplotlib.pyplot as plt
-
+import numpy as np
+import pandas as pd
+import shap
 import xgboost as xgb
-from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline 
-from pathlib import Path
-
+from sklearn.pipeline import Pipeline
+from xgboost import XGBClassifier
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -39,7 +35,16 @@ def _native_xgb_explainer(booster: xgb.Booster):
 
 
 class ModelExplainer:
-    def __init__(self, model, X_train: pd.DataFrame, feature_names: list = None, max_background_samples: int = 1000, output_dir: Path = None, *, seed: int):
+    def __init__(
+        self,
+        model,
+        X_train: pd.DataFrame,
+        feature_names: list = None,
+        max_background_samples: int = 1000,
+        output_dir: Path = None,
+        *,
+        seed: int,
+    ):
         self.model = model
         self.seed = seed
         self.output_dir = output_dir
@@ -157,7 +162,9 @@ class ModelExplainer:
             clf_name = type(clf).__name__
             
             if "LogisticRegression" in clf_name or "Linear" in clf_name:
-                logger.info("Pipeline ends with LogisticRegression. Extracting LinearExplainer for ultra-fast processing.")
+                logger.info(
+                    "Pipeline ends with LogisticRegression. Extracting LinearExplainer for ultra-fast processing."
+                )
                 self.is_linear_pipeline = True
                 self.preprocessor = Pipeline(model.steps[:-1])
                 
@@ -251,7 +258,11 @@ class ModelExplainer:
             if len(local_shap.shape) == 3:
                 local_shap = local_shap[:, :, 1] if local_shap.shape[2] == 2 else local_shap[:, :, 0]
         else:
-            ls = local_shap[1] if isinstance(local_shap, list) and len(local_shap) > 1 else (local_shap[0] if isinstance(local_shap, list) else local_shap)
+            ls = (
+                local_shap[1]
+                if isinstance(local_shap, list) and len(local_shap) > 1
+                else (local_shap[0] if isinstance(local_shap, list) else local_shap)
+            )
             if len(ls.shape) == 3:
                 ls = ls[:, :, 1] if ls.shape[2] == 2 else ls[:, :, 0]
             

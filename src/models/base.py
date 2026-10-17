@@ -1,14 +1,14 @@
 import abc
-import numpy as np
-import pandas as pd
-import mlflow
 import logging
 import re
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, List
-from sklearn.model_selection import StratifiedKFold, train_test_split
-from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_curve
+from typing import Any, Dict, List, Optional
 
+import mlflow
+import numpy as np
+import pandas as pd
+from sklearn.metrics import average_precision_score, precision_recall_curve, roc_auc_score
+from sklearn.model_selection import StratifiedKFold, train_test_split
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -195,7 +195,9 @@ class BaseModel(abc.ABC):
             params[self.n_estimators_key] = int(np.median(cv.best_iterations)) + 1
         return params
 
-    def optimize_threshold(self, y_true: np.ndarray, y_proba: np.ndarray, fn_cost: float, fp_cost: float) -> Dict[str, float]:
+    def optimize_threshold(
+        self, y_true: np.ndarray, y_proba: np.ndarray, fn_cost: float, fp_cost: float
+    ) -> Dict[str, float]:
         """
         Finds the optimal probability threshold based on F1-Score and Business Cost.
         

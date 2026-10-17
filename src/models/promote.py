@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from mlflow.exceptions import MlflowException
-from mlflow.protos.databricks_pb2 import ErrorCode, INVALID_PARAMETER_VALUE, RESOURCE_DOES_NOT_EXIST
+from mlflow.protos.databricks_pb2 import INVALID_PARAMETER_VALUE, RESOURCE_DOES_NOT_EXIST, ErrorCode
 from mlflow.tracking import MlflowClient
 
 from src.config import load_params
@@ -81,7 +81,9 @@ def promote(registered_name: str, params: dict, client: MlflowClient | None = No
             return False
 
     client.set_registered_model_alias(registered_name, CHAMPION_ALIAS, challenger.version)
-    logger.info(f"Promoted {registered_name} v{challenger.version} to '{CHAMPION_ALIAS}' (AUC={auc:.4f}, min DI={min_di:.3f})")
+    logger.info(
+        f"Promoted {registered_name} v{challenger.version} to '{CHAMPION_ALIAS}' (AUC={auc:.4f}, min DI={min_di:.3f})"
+    )
     return True
 
 

@@ -1,5 +1,6 @@
-import pandas as pd
 import gc
+
+import pandas as pd
 
 
 def create_installments_row_features(ins_df: pd.DataFrame) -> pd.DataFrame:

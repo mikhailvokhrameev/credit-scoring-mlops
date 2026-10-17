@@ -1,7 +1,9 @@
-import xgboost as xgb
-import pandas as pd
+from typing import Any, Dict, Optional
+
 import numpy as np
-from typing import Dict, Any, Optional
+import pandas as pd
+import xgboost as xgb
+
 from src.config import load_params
 from src.models.base import BaseModel
 
