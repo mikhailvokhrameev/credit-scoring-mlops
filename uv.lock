@@ -603,6 +603,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "nbformat" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -636,6 +637,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "nbformat", specifier = ">=5.11.1" },
     { name = "pytest" },
     { name = "ruff" },
 ]

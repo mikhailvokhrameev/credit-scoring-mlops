@@ -1,4 +1,4 @@
-.PHONY: check lint test smoke
+.PHONY: check lint test smoke notebooks
 
 check: lint test
 
@@ -10,3 +10,6 @@ test:
 
 smoke:
 	uv run pytest -q -m smoke
+
+notebooks:
+	uv run --group notebooks jupyter nbconvert --to notebook --execute notebooks/04_interpretation.ipynb --output-dir $$(mktemp -d)
