@@ -44,14 +44,31 @@ During this work, I gained experience in:
 
 - **Python 3.10**, **uv** — dependency and environment management (`uv.lock`)
 - **DVC** — data and pipeline versioning (`dvc.yaml`)
-- **pandas, ydata-profiling, kaggle** — data and EDA
+- **pandas, pyarrow, scipy, kaggle** — data, Parquet cache and statistics (`ydata-profiling` for EDA, notebooks group)
 - **scikit-learn, LightGBM, XGBoost, CatBoost** — ML
 - **optuna, optuna-dashboard** — hyperparameter optimization
 - **mlflow** — experiment tracking
 - **shap** — interpretability (XAI)
 - **matplotlib, seaborn** — visualization
-- **jupyterlab, nbconvert, quarto** — notebooks and reports
-- **joblib** — model serialization
+- **jupyterlab, nbconvert, quarto** — notebooks and reports (notebooks group)
+- **ruff, pytest** — lint and tests (dev group)
+
+---
+
+## Repository Layout
+
+```
+src/data/        loader (CSV to Parquet), split (holdout), preprocessor
+src/features/    per-table feature modules, pipeline.py, pipeline_base.py
+src/models/      train.py (CLI), tuner.py (Optuna), promote.py, model wrappers
+src/evaluation/  metrics, fairness, SHAP explainer, compare_models (legacy)
+src/monitoring/  PSI drift
+notebooks/       01_EDA, 04_interpretation
+tests/           leakage, metrics, promotion gate, drift, smoke
+docs/            datasheet.md, model_card.md
+params.yaml      all parameters, seeds and costs
+dvc.yaml         pipeline graph
+```
 
 ---
 
@@ -70,10 +87,10 @@ Each data source is processed separately: financial ratios, behavioral indicator
 An abstract base class establishes a single contract upon which four models are implemented: Logistic Regression, LightGBM, XGBoost, and CatBoost. Adding a new algorithm simply requires writing one subclass.
 
 #### Bayesian Hyperparameter Optimization
-Optuna maximizes the mean ROC-AUC across folds; trial history is stored in `optuna.db` (SQLite), enabling search resumption.
+Optuna maximizes the mean ROC-AUC across folds; trial history is stored in `optuna.db` (SQLite). The study name embeds a hash of the data and config (`make_study_name`), so a search resumes only with the same data and configuration.
 
 #### Experiment Tracking in MLflow
-Nested run structure: parent Run → child HPO and Final_Production. Parameters, metrics, SHAP reports, and model dumps are logged. Every trained model is registered in the Model Registry with the alias `challenger`; the `champion` alias is set only by the promotion gate `src/models/promote.py` (holdout ROC-AUC not worse than the current champion by more than `gate.auc_epsilon`, and the minimum disparate-impact ratio at least `fairness.di_min`).
+Nested run structure: parent Run → child HPO and Final_Production (for `--base` runs there is no `Final_Production` child: the metrics are logged on the parent run). Parameters, metrics, SHAP reports, and model dumps are logged. Every trained model is registered in the Model Registry with the alias `challenger`; the `champion` alias is set only by the promotion gate `src/models/promote.py` (holdout ROC-AUC not worse than the current champion by more than `gate.auc_epsilon`, and the minimum disparate-impact ratio at least `fairness.di_min`).
 
 <div align="center">
 <img src="https://github.com/user-attachments/assets/ac4c1d9d-8be4-4f1f-b32f-f6e79e03962c"><br>
@@ -144,6 +161,8 @@ The whole pipeline is a DVC graph (`uv run dvc dag`): `prepare` (CSV to Parquet 
 uv run dvc repro
 ```
 
+> `dvc repro` also trains all four models (`train@foreach`, defaults: 30 trials, CPU), which takes a long time. To stop at the features: `uv run dvc repro features`.
+
 Or stage by stage:
 
 ```bash
@@ -186,7 +205,14 @@ uv run python -m src.models.train --model catboost --trials 30 --device gpu
 
 **Output** (in `artifacts/<model>_model/`): `model.joblib` (full wrapper), `metrics.json`, `xai/` (SHAP plots and `shap_feature_importance.csv`), `guardrails/` (reliability table and plot, per-group fairness CSVs) and `monitoring/` (PSI reports). Everything is simultaneously logged to MLflow; the decision thresholds are stored only there, as the run artifact `inference/thresholds.json`. The model is refit on the whole training part and scored on the holdout exactly once; holdout metrics, calibration, fairness and drift guardrails are logged with it.
 
-> Quick draft model without HPO on a single table: `uv run python -m src.models.train --model lgbm --base --trials 0`.
+`metrics.json` (and the same names in MLflow) contains:
+
+- `final_oof_*` and `holdout_*`: `roc_auc`, `gini`, `ks_statistic`, `average_precision`, `brier`;
+- `holdout_business_loss`, `holdout_fn`, `holdout_fp`, `holdout_approval_rate` (at the business threshold from OOF);
+- fairness: `holdout_fairness_{gender,age}_{di_ratio,eo_gap}` and `holdout_fairness_min_di`;
+- drift: `psi_score`, `psi_max_feature`, plus the `drift_alert` run tag (monitoring only, never fails training).
+
+> Quick draft model without HPO on a single table: `uv run python -m src.models.train --model lgbm --base --trials 0` (needs `uv run python -m src.features.pipeline_base` first). `--base` artifacts go to `artifacts/<model>_base_model/`; this is not a DVC stage and the folder is git-ignored. Its metrics live on the parent MLflow run.
 
 ### 5. Promotion to Champion
 
@@ -208,11 +234,32 @@ Open http://127.0.0.1:5000 — model comparison by ROC-AUC, nested HPO/Final_Pro
 
 For deep SHAP analysis, use [04_interpretation.ipynb](notebooks/04_interpretation.ipynb) or run `make notebooks` to execute it (requires processed data and the `lgbm` model and at least one other trained model).
 
+To export models for serving (e.g. LoanSight):
+
+```bash
+uv run python export_serving_artifacts.py
+```
+
+For each `artifacts/<model>_model/` with a `model.joblib` it writes `serving_model.joblib` (the bare estimator) and `metadata.json` (`model_type`, `feature_names`); models that already have both files are skipped (delete them to re-export after retraining). `metrics` and `thresholds` in `metadata.json` are empty: the decision thresholds are taken from the MLflow run artifact `inference/thresholds.json`.
+
+---
+
+## Tests and CI
+
+```bash
+make check    # ruff + pytest
+make smoke    # only `-m smoke`: end-to-end training on synthetic data
+```
+
+Tests cover leakage, the promotion gate, drift (PSI), fairness, metric math, seed routing and the notebooks (`src` imports, cleared outputs). CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs `uv sync --locked --group dev` and `make check` on every push and pull request.
+
 ---
 
 ## Hypotheses
 
 During the study, five hypotheses were formulated and statistically tested, covering data nature, feature importance, and training method efficiency.
+
+> **Reproducibility.** H1 and H2: the code that produced these figures was deleted together with the old notebooks (commit `144b110`); the repository currently contains no Spearman or Mann–Whitney computation, so they cannot be re-run. H3 can be checked from `artifacts/<model>_model/xai/shap_feature_importance.csv`. H4 and H5 were computed by `src/evaluation/compare_models.py` from `cv_mean_roc_auc`; it is legacy: it looks for `*_non_hpo` runs, which the current `train.py` does not create (`--trials 0` creates a run named `<model>`), so it reproduces neither H4 nor H5 as is.
 
 ---
 
@@ -295,7 +342,7 @@ During the study, five hypotheses were formulated and statistically tested, cove
 
 > **All tables below are OOF numbers, obtained before the leakage fix (F1).** They are optimistic. Holdout numbers will replace them after `uv run dvc repro` (see [docs/model_card.md](docs/model_card.md)); a holdout ROC-AUC somewhat lower than these figures is expected.
 
-Testing on real data confirmed the advantage of ensemble methods over linear ones. The best result in terms of pure OOF performance is **`xgb_full`** (ROC-AUC = 0.788), while the best balance of performance and speed is **CatBoost**.
+Testing on real data confirmed the advantage of ensemble methods over linear ones. The best result in terms of pure OOF performance is **`xgb_full`** (ROC-AUC = 0.788).
 
 | Algorithm | Version | ROC-AUC (OOF, pre-F1) | PR-AUC (OOF, pre-F1) | Gini (OOF, pre-F1) | Business Loss (OOF, pre-F1) |
 |---|---|---|---|---|---|
@@ -323,6 +370,8 @@ Testing on real data confirmed the advantage of ensemble methods over linear one
 
 - **Stacking Ensemble**: meta-model (LogReg) on top of predictions from CatBoost + LightGBM + XGBoost to maximize ROC-AUC.
 - **Production Monitoring**: PSI of the score and top features against the Kaggle test sample is already logged; evaluation on fresh labelled cohorts and the automatic rollback described in the model card's error budget are not implemented.
+- **Legacy comparison script**: update `src/evaluation/compare_models.py` to the current run names.
+- **Export metadata**: fill `metrics` and `thresholds` in the exported `metadata.json` from MLflow.
 - **Probability Calibration** (Brier and reliability are only monitored now) and score scaling to bank-standard range [0, 1000].
 
 ---
