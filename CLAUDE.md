@@ -1,0 +1,33 @@
+# credit-scoring-mlops
+Training/research pipeline for credit default scoring on Home Credit (7 relational tables): Python 3.10, pandas, LogReg/LightGBM/XGBoost/CatBoost, Optuna, MLflow, DVC. Exported artifacts are served by the separate LoanSight web app.
+
+**IMPORTANT: Nothing is ever fit on the holdout (encoders, feature selection, HPO, early stopping, thresholds). It is scored exactly once, in `src/models/train.py`; ids in `data/processed/holdout_ids.json`.**
+**YOU MUST NOT add `Co-Authored-By: Claude` or "Generated with Claude Code" to commits or PR descriptions.**
+
+## Commands (run from repo root; env is uv, never conda/pip)
+- Setup: `uv sync` (+ `--group notebooks` for Jupyter) · add dep: `uv add <pkg>`, never edit `uv.lock` by hand
+- Pipeline graph: `uv run dvc dag` (stages: prepare → split → features/features_base → train@{model})
+- Train: `uv run python -m src.models.train --model {logreg|lgbm|xgb|catboost} --trials 30 [--device gpu] [--base]`
+- Promote to champion: `uv run python -m src.models.promote --model <name> [--base]` (exit 1 = rejected by gate)
+- Lint + tests: `make check` · tests only: `uv run pytest -q`
+- MLflow UI: `uv run mlflow ui --backend-store-uri sqlite:///mlflow.db`
+
+## Anti-patterns
+- Hardcoded params/paths/seeds/costs: everything comes from `params.yaml` via `src/config.load_params()`.
+- Filling missing inference features with 0 or swallowing exceptions (e.g. turning failures into pruned trials): fail loudly.
+- New copy-paste training scripts: extend `train.py` via flags.
+- Tests that only raise coverage: test leakage, schema, reproducibility, metric math.
+- README claims not backed by code or an MLflow run.
+- Bloated PR descriptions; commits are small, imperative (`Add holdout split before selection`), with no AI attribution.
+
+## Caveats
+- `data/` is DVC-tracked, never git; raw CSVs need a Kaggle token (`kaggle competitions download -c home-credit-default-risk`), then `uv run dvc add data/raw`. The full pipeline (`dvc repro`) needs that data and was not run without it.
+- `test_features.parquet` = Kaggle test without labels: drift (PSI) only, never evaluation.
+- Optuna study name embeds data+config hash; reusing a study mixes trials from other feature versions.
+- Model wrappers must not mutate `self.params`: CV fold clones share it.
+- `CODE_GENDER` is excluded from model features (`features.exclude`) but kept for the fairness audit; `DAYS_BIRTH` stays a feature. `promote.py` blocks `champion` when holdout `holdout_fairness_min_di` < `fairness.di_min`.
+- `365243` in `DAYS_*` columns is a missing-value sentinel, handled in `src/data/preprocessor.py`.
+- `notebooks/03_modelling.ipynb` and `04_interpretation.ipynb` use the pre-audit API and fail; the `src/` CLI is the supported path.
+
+## Docs (read on demand)
+- Data: `docs/datasheet.md` · Model: `docs/model_card.md` · Params: `params.yaml`
