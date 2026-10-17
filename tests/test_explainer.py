@@ -105,6 +105,7 @@ def test_xgb_permutation_fallback_is_seeded_last_resort(synth, tmp_path, monkeyp
     with caplog.at_level("WARNING", logger="src.evaluation.explainer"):
         explainer = ModelExplainer(model, X, seed=seed, output_dir=tmp_path)
     assert "Native XGBoost TreeSHAP failed" in caplog.text
+    assert explainer.output_space == "probability"
     assert explainer.explain_local_shap(X.iloc[0], save_path=tmp_path / "local.png").exists()
 
 

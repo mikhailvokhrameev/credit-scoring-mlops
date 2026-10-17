@@ -14,6 +14,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 
+from src.models.base import BaseModel
+
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
 
@@ -268,7 +270,7 @@ class ModelExplainer:
 
 
 def compare_local_contributions(
-    models: dict,
+    models: dict[str, BaseModel],
     X_background: pd.DataFrame,
     instance: pd.Series,
     *,
@@ -279,7 +281,8 @@ def compare_local_contributions(
 
     Rows are features (union over the models), columns are the `models` keys in order; a feature the
     model does not use is NaN. Rows are sorted by the largest |contribution| over the models and cut
-    to `top_n`.
+    to `top_n`. The index holds the models' sanitized feature names (`BaseModel._sanitize_columns`),
+    which may differ from the raw column names.
 
     Raises:
         ValueError: if a model's explainer does not work in log-odds (values would not be comparable).
