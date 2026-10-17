@@ -1,0 +1,84 @@
+stages:
+  prepare:
+    cmd: python -m src.data.loader
+    deps:
+      - data/raw
+      - src/data/loader.py
+    outs:
+      - data/cache
+
+  split:
+    cmd: python -m src.data.split
+    deps:
+      - data/cache/application_train.parquet
+      - src/data/split.py
+    params:
+      - seed
+      - data.holdout_size
+    outs:
+      - data/processed/holdout_ids.json
+
+  # data/processed also holds holdout_ids.json (written by `split`), so outs are listed per file.
+  features:
+    cmd: python -m src.features.pipeline
+    deps:
+      - data/cache
+      - data/processed/holdout_ids.json
+      - src/features
+      - src/data
+    params:
+      - seed
+      - features
+    outs:
+      - data/processed/train_features.parquet
+      - data/processed/holdout_features.parquet
+      - data/processed/test_features.parquet
+      - data/processed/selected_features.json
+      - data/processed/feature_importance.csv
+
+  features_base:
+    cmd: python -m src.features.pipeline_base
+    deps:
+      - data/cache
+      - data/processed/holdout_ids.json
+      - src/features
+      - src/data
+    params:
+      - seed
+      - features
+    outs:
+      - data/processed_base
+
+  train:
+    foreach:
+      - logreg
+      - lgbm
+      - xgb
+      - catboost
+    do:
+      cmd: python -m src.models.train --model ${item}
+      deps:
+        - data/processed/train_features.parquet
+        - data/processed/holdout_features.parquet
+        - data/processed/test_features.parquet
+        - data/processed/selected_features.json
+        - data/processed/feature_importance.csv
+        - data/processed/holdout_ids.json
+        - src/models
+        - src/evaluation
+        - src/monitoring
+        - src/config.py
+      params:
+        - seed
+        - cv
+        - hpo
+        - train
+        - business
+        - mlflow
+        - monitoring
+        - fairness
+      outs:
+        - artifacts/${item}_model/model.joblib
+      metrics:
+        - artifacts/${item}_model/metrics.json:
+            cache: false
