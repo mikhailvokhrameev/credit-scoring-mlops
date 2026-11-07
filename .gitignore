@@ -247,3 +247,9 @@ mlruns/
 # superpowers (agent plans and scratch)
 /.superpowers/
 /docs/superpowers/
+
+# docs
+*.md
+
+# Scripts
+*.ps1
